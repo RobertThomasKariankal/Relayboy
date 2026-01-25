@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Relay Chat</title>
+  <style>
+    body { font-family: Arial; margin: 20px; }
+    input { margin: 5px; }
+    #chat { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; }
+  </style>
+</head>
+<body>
+  <h2>Relay Chat</h2>
+
+  <input id="username" placeholder="Your name" />
+  <button onclick="connect()">Connect</button>
+  <br><br>
+
+  <input id="to" placeholder="Send to" />
+  <input id="msg" placeholder="Message" />
+  <button onclick="send()">Send</button>
+
+  <pre id="chat"></pre>
+
+<script>
+let socket;
+
+function connect() {
+  const name = document.getElementById("username").value;
+  if (!name) return alert("Enter your name");
+
+  // Connect to server using secure WebSocket
+  socket = new WebSocket(`wss://${window.location.host}`);
+
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ type: "register", username: name }));
+    addChat("Connected as " + name);
+  };
+
+  socket.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    addChat(`${data.from}: ${data.message}`);
+  };
+
+  socket.onclose = () => addChat("Disconnected from server");
+}
+
+function send() {
+  const to = document.getElementById("to").value;
+  const msg = document.getElementById("msg").value;
+  if (!to || !msg) return;
+
+  socket.send(JSON.stringify({ type: "message", to, message: msg }));
+  addChat(`You -> ${to}: ${msg}`);
+  document.getElementById("msg").value = "";
+}
+
+function addChat(msg) {
+  const chat = document.getElementById("chat");
+  chat.textContent += msg + "\n";
+  chat.scrollTop = chat.scrollHeight;
+}
+</script>
+</body>
+</html>
