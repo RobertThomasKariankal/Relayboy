@@ -1,62 +1,143 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Relay Chat</title>
-  <style>
-    body { font-family: Arial; margin: 20px; }
-    input { margin: 5px; }
-    #chat { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; }
-  </style>
+<meta charset="UTF-8">
+<title>RelayBoy Chat</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* Global */
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Roboto', sans-serif; }
+body { background: #1a1a2e; color: #fff; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+
+/* Header */
+h1 { margin-bottom: 20px; }
+
+/* Layout */
+.container { display: flex; width: 100%; max-width: 1000px; height: 500px; border-radius: 10px; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+
+/* Sidebar - Online Users */
+.users-box { width: 200px; background: #162447; padding: 15px; display: flex; flex-direction: column; }
+.users-box h3 { margin-bottom: 10px; }
+.online-users { list-style: none; flex: 1; overflow-y: auto; }
+.online-users li { padding: 10px; cursor: pointer; border-radius: 5px; margin-bottom: 5px; transition: 0.2s; display: flex; align-items: center; }
+.online-users li:hover { background: #1f4068; }
+.avatar { width: 30px; height: 30px; border-radius: 50%; background: #e94560; display: inline-block; margin-right: 10px; text-align: center; line-height: 30px; font-weight: bold; color: #fff; }
+
+/* Chat Box */
+.chat-box { flex: 1; background: #1f2861; display: flex; flex-direction: column; padding: 15px; overflow-y: auto; }
+.message { margin-bottom: 10px; padding: 10px 15px; border-radius: 20px; max-width: 70%; word-wrap: break-word; display: inline-block; }
+.message.right { background: #e94560; color: #fff; align-self: flex-end; border-bottom-right-radius: 5px; }
+.message.left { background: #162447; color: #fff; align-self: flex-start; border-bottom-left-radius: 5px; }
+.timestamp { font-size: 0.7em; color: #ccc; margin-left: 5px; }
+
+/* Input Group */
+.input-group { display: flex; gap: 10px; margin-top: 10px; width: 100%; max-width: 1000px; }
+input, button { padding: 10px; border-radius: 5px; border: none; outline: none; }
+input { flex: 1; }
+button { background: #e94560; color: #fff; cursor: pointer; transition: 0.2s; }
+button:hover { background: #d1344a; }
+#error { color: #ff5c5c; margin-top: 10px; text-align: center; }
+</style>
 </head>
 <body>
-  <h2>Relay Chat</h2>
 
-  <input id="username" placeholder="Your name" />
+<h1>RelayBoy Chat</h1>
+
+<div class="input-group">
+  <input id="username" placeholder="Enter your username" />
   <button onclick="connect()">Connect</button>
-  <br><br>
+</div>
+<div id="error"></div>
 
-  <input id="to" placeholder="Send to" />
-  <input id="msg" placeholder="Message" />
+<div class="container">
+  <div class="users-box">
+    <h3>Online Users</h3>
+    <ul id="users" class="online-users"></ul>
+  </div>
+  <div class="chat-box" id="chat"></div>
+</div>
+
+<div class="input-group" style="margin-top:10px;">
+  <input id="msg" placeholder="Type your message" />
   <button onclick="send()">Send</button>
-
-  <pre id="chat"></pre>
+</div>
 
 <script>
 let socket;
+let username;
+let currentChat = null;
+let chatHistory = {}; // per-user messages
 
 function connect() {
-  const name = document.getElementById("username").value;
-  if (!name) return alert("Enter your name");
+  username = document.getElementById("username").value.trim();
+  const errorDiv = document.getElementById("error");
+  errorDiv.textContent = "";
+  if (!username) return errorDiv.textContent = "Enter a valid username";
 
-  // Connect to server using secure WebSocket
-  socket = new WebSocket(`wss://${window.location.host}`);
+  const protocol = window.location.hostname === "localhost" ? "ws" : "wss";
+  socket = new WebSocket(`${protocol}://${window.location.host}`);
 
   socket.onopen = () => {
-    socket.send(JSON.stringify({ type: "register", username: name }));
-    addChat("Connected as " + name);
+    socket.send(JSON.stringify({ type: "register", username }));
+    errorDiv.textContent = "Connected as " + username;
   };
 
   socket.onmessage = (e) => {
     const data = JSON.parse(e.data);
-    addChat(`${data.from}: ${data.message}`);
-  };
 
-  socket.onclose = () => addChat("Disconnected from server");
+    if (data.type === "error") {
+      errorDiv.textContent = data.message;
+      socket.close();
+    }
+
+    if (data.type === "users") {
+      const usersDiv = document.getElementById("users");
+      usersDiv.innerHTML = "";
+      data.users.filter(u => u !== username).forEach(u => {
+        const li = document.createElement("li");
+        li.innerHTML = `<span class="avatar">${u.charAt(0).toUpperCase()}</span>${u}`;
+        li.onclick = () => openChat(u);
+        usersDiv.appendChild(li);
+      });
+    }
+
+    if (data.type === "message") {
+      if (!chatHistory[data.from]) chatHistory[data.from] = [];
+      chatHistory[data.from].push({ from: data.from, message: data.message, timestamp: data.timestamp });
+      if (currentChat === data.from) renderChat(currentChat);
+    }
+  };
+}
+
+function openChat(user) {
+  currentChat = user;
+  if (!chatHistory[user]) chatHistory[user] = [];
+  renderChat(user);
 }
 
 function send() {
-  const to = document.getElementById("to").value;
-  const msg = document.getElementById("msg").value;
-  if (!to || !msg) return;
+  const msgInput = document.getElementById("msg");
+  const msg = msgInput.value.trim();
+  if (!msg || !currentChat) return;
 
-  socket.send(JSON.stringify({ type: "message", to, message: msg }));
-  addChat(`You -> ${to}: ${msg}`);
-  document.getElementById("msg").value = "";
+  socket.send(JSON.stringify({ type: "message", to: currentChat, message: msg }));
+
+  if (!chatHistory[currentChat]) chatHistory[currentChat] = [];
+  chatHistory[currentChat].push({ from: username, message: msg, timestamp: new Date().toLocaleTimeString() });
+  renderChat(currentChat);
+
+  msgInput.value = "";
 }
 
-function addChat(msg) {
+function renderChat(user) {
   const chat = document.getElementById("chat");
-  chat.textContent += msg + "\n";
+  chat.innerHTML = "";
+  chatHistory[user].forEach(msg => {
+    const div = document.createElement("div");
+    div.className = "message " + (msg.from === username ? "right" : "left");
+    div.innerHTML = msg.message + `<span class="timestamp"> [${msg.timestamp}]</span>`;
+    chat.appendChild(div);
+  });
   chat.scrollTop = chat.scrollHeight;
 }
 </script>
