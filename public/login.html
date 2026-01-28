@@ -1,68 +1,251 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>RelayBoy Login</title>
-<style>
-body { background:#111; color:#fff; font-family:Arial, sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; }
-.container { width:360px; background:#1a1a2e; padding:20px; border-radius:8px; }
-input,button { width:100%; padding:10px; margin:6px 0; border-radius:4px; border:none; }
-button { background:#e94560; color:#fff; }
-.error { color:#ff7b7b; }
-.switch { text-align:center; margin-top:10px; color:#ccc; }
-a { color:#fff; text-decoration:underline }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RelayBoy - Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 400px;
+            background: #0f3460;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            border: 1px solid #233a5e;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            font-size: 32px;
+            font-weight: 700;
+            color: #ff6b6b;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #a0a0a0;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: #e0e0e0;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            background: #1a2d47;
+            border: 1px solid #233a5e;
+            border-radius: 6px;
+            color: #e0e0e0;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #ff6b6b;
+            background: #233a5e;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-login {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        .btn-login:hover {
+            background: #ff5252;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(255, 107, 107, 0.3);
+        }
+
+        .btn-register {
+            background: #233a5e;
+            color: #ff6b6b;
+            border: 1px solid #ff6b6b;
+        }
+
+        .btn-register:hover {
+            background: #2a4a70;
+        }
+
+        .error {
+            color: #ff6b6b;
+            font-size: 13px;
+            margin-top: 8px;
+            min-height: 20px;
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .form-toggle {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 13px;
+            color: #a0a0a0;
+        }
+
+        .form-toggle a {
+            color: #ff6b6b;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .form-toggle a:hover {
+            text-decoration: underline;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
 </head>
 <body>
-<div class="container">
-  <h2>RelayBoy</h2>
-  <div id="forms">
-    <div id="loginForm">
-      <input id="loginIdentifier" placeholder="Email or Username" />
-      <input id="loginPassword" type="password" placeholder="Password" />
-      <button onclick="doLogin()">Login</button>
-      <div class="switch">Don't have an account? <a href="#" onclick="showRegister()">Register</a></div>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🔗 RelayBoy</div>
+            <div class="subtitle">Real-time Chat Application</div>
+        </div>
+
+        <!-- Login Form -->
+        <form id="loginForm" class="hidden">
+            <div class="form-group">
+                <label for="loginEmail">Email or Username</label>
+                <input type="text" id="loginEmail" placeholder="Enter email or username" required>
+            </div>
+            <div class="form-group">
+                <label for="loginPassword">Password</label>
+                <input type="password" id="loginPassword" placeholder="Enter password" required>
+            </div>
+            <div class="error" id="loginError"></div>
+            <div class="button-group">
+                <button type="submit" class="btn-login">Login</button>
+                <button type="button" class="btn-register" onclick="toggleForm()">Register</button>
+            </div>
+        </form>
+
+        <!-- Register Form -->
+        <form id="registerForm">
+            <div class="form-group">
+                <label for="regEmail">Email</label>
+                <input type="email" id="regEmail" placeholder="Enter email" required>
+            </div>
+            <div class="form-group">
+                <label for="regUsername">Username</label>
+                <input type="text" id="regUsername" placeholder="Choose username" required>
+            </div>
+            <div class="form-group">
+                <label for="regPassword">Password</label>
+                <input type="password" id="regPassword" placeholder="Create password" required>
+            </div>
+            <div class="error" id="registerError"></div>
+            <div class="button-group">
+                <button type="submit" class="btn-login">Register</button>
+                <button type="button" class="btn-register" onclick="toggleForm()">Login</button>
+            </div>
+        </form>
     </div>
 
-    <div id="regForm" style="display:none;">
-      <input id="regEmail" placeholder="Email" />
-      <input id="regUsername" placeholder="Username" />
-      <input id="regPassword" type="password" placeholder="Password" />
-      <button onclick="doRegister()">Register</button>
-      <div class="switch">Already have an account? <a href="#" onclick="showLogin()">Login</a></div>
-    </div>
-  </div>
-  <div id="error" class="error"></div>
-</div>
+    <script>
+        let currentMode = 'register';
 
-<script>
-async function doRegister() {
-  const email = document.getElementById('regEmail').value.trim();
-  const username = document.getElementById('regUsername').value.trim();
-  const password = document.getElementById('regPassword').value;
-  document.getElementById('error').textContent = '';
-  try {
-    const res = await fetch('/register', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email, username, password }) });
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || 'Register failed');
-    window.location.href = '/chat';
-  } catch (e) { document.getElementById('error').textContent = e.message; }
-}
+        function toggleForm() {
+            currentMode = currentMode === 'login' ? 'register' : 'login';
+            document.getElementById('loginForm').classList.toggle('hidden');
+            document.getElementById('registerForm').classList.toggle('hidden');
+        }
 
-async function doLogin() {
-  const identifier = document.getElementById('loginIdentifier').value.trim();
-  const password = document.getElementById('loginPassword').value;
-  document.getElementById('error').textContent = '';
-  try {
-    const res = await fetch('/login', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ emailOrUsername: identifier, password }) });
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || 'Login failed');
-    window.location.href = '/chat';
-  } catch (e) { document.getElementById('error').textContent = e.message; }
-}
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('regEmail').value;
+            const username = document.getElementById('regUsername').value;
+            const password = document.getElementById('regPassword').value;
 
-function showRegister(){ document.getElementById('loginForm').style.display='none'; document.getElementById('regForm').style.display='block'; document.getElementById('error').textContent=''; }
-function showLogin(){ document.getElementById('loginForm').style.display='block'; document.getElementById('regForm').style.display='none'; document.getElementById('error').textContent=''; }
-</script>
+            try {
+                const res = await fetch('/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, username, password })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                window.location.href = '/chat';
+            } catch (err) {
+                document.getElementById('registerError').textContent = err.message || 'Registration failed';
+            }
+        });
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const emailOrUsername = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            try {
+                const res = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ emailOrUsername, password })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                window.location.href = '/chat';
+            } catch (err) {
+                document.getElementById('loginError').textContent = err.message || 'Login failed';
+            }
+        });
+    </script>
 </body>
 </html>

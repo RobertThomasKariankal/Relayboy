@@ -1,14 +1,19 @@
-const express = require("express");
-const http = require("http");
-const WebSocket = require("ws");
-const path = require("path");
-const fs = require("fs");
-const bcrypt = require("bcryptjs");
-const cookieParser = require("cookie-parser");
-const session = require("express-session");
+import express from "express";
+import http from "http";
+import { WebSocketServer } from "ws";
+import path from "path";
+import fs from "fs";
+import bcrypt from "bcryptjs";
+import cookieParser from "cookie-parser";
+import session from "express-session";
+import { fileURLToPath } from "url";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Get __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Simple user store (JSON file)
 const USERS_FILE = path.join(__dirname, "users.json");
@@ -36,7 +41,7 @@ const sessionParser = session({
 });
 app.use(sessionParser);
 
-// Serve public assets (login is public; chat will be protected by routes)
+// Serve public assets
 app.use('/static', express.static(path.join(__dirname, 'public')));
 
 // Routes
@@ -51,34 +56,65 @@ app.get('/chat', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// -------------------- UPDATED REGISTER ROUTE --------------------
 app.post('/register', (req, res) => {
   const { email, username, password } = req.body;
   if (!email || !username || !password) return res.status(400).json({ error: 'Missing fields' });
+
   const users = loadUsers();
+
   // ensure unique email and username
   for (const u in users) {
     if (users[u].email === email) return res.status(400).json({ error: 'Email taken' });
-    if (u === username) return res.status(400).json({ error: 'Username taken' });
+    if (users[u].username === username) return res.status(400).json({ error: 'Username taken' });
   }
+
   const hashed = bcrypt.hashSync(password, 10);
-  users[username] = { email, password: hashed };
+
+  // New structured user object
+  const userId = username; // keep username as key
+  users[userId] = {
+    username,
+    email,
+    password_hash: hashed,
+    created_at: new Date().toISOString(),
+    last_login: null,
+    is_verified: false
+  };
+
   saveUsers(users);
+
   req.session.authenticated = true;
   req.session.username = username;
   res.json({ ok: true });
 });
 
+// -------------------- UPDATED LOGIN ROUTE --------------------
 app.post('/login', (req, res) => {
   const { emailOrUsername, password } = req.body;
   if (!emailOrUsername || !password) return res.status(400).json({ error: 'Missing fields' });
+
   const users = loadUsers();
+
   // Find by username or email
   let found = null;
   for (const u in users) {
-    if (u === emailOrUsername || users[u].email === emailOrUsername) { found = { username: u, ...users[u] }; break; }
+    if (u === emailOrUsername || users[u].email === emailOrUsername) {
+      found = users[u];
+      break;
+    }
   }
+
   if (!found) return res.status(400).json({ error: 'Invalid credentials' });
-  if (!bcrypt.compareSync(password, found.password)) return res.status(400).json({ error: 'Invalid credentials' });
+
+  if (!bcrypt.compareSync(password, found.password_hash)) {
+    return res.status(400).json({ error: 'Invalid credentials' });
+  }
+
+  // update last_login
+  found.last_login = new Date().toISOString();
+  saveUsers(users);
+
   req.session.authenticated = true;
   req.session.username = found.username;
   res.json({ ok: true });
@@ -88,8 +124,9 @@ app.post('/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
+// -------------------- WebSocket --------------------
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ noServer: true });
+const wss = new WebSocketServer({ noServer: true });
 
 // Map username -> ws
 const clients = new Map();
@@ -98,12 +135,13 @@ function broadcastUsers() {
   const users = Array.from(clients.keys());
   const data = JSON.stringify({ type: "users", users });
   for (const ws of clients.values()) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    if (ws.readyState === 1) { // WebSocket.OPEN
+      ws.send(data);
+    }
   }
 }
 
 server.on('upgrade', (req, socket, head) => {
-  // parse session
   sessionParser(req, {}, () => {
     if (!req.session || !req.session.authenticated) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -124,10 +162,11 @@ wss.on('connection', (ws, req) => {
   }
   console.log(`${username} connected via websocket`);
   clients.set(username, ws);
-  // send initial info
-  if (ws.readyState === WebSocket.OPEN) {
+
+  if (ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'connected', username }));
   }
+
   broadcastUsers();
 
   ws.on('message', (data) => {
@@ -135,7 +174,7 @@ wss.on('connection', (ws, req) => {
       const msg = JSON.parse(data);
       if (msg.type === 'message') {
         const target = clients.get(msg.to);
-        if (target && target.readyState === WebSocket.OPEN) {
+        if (target && target.readyState === 1) {
           target.send(JSON.stringify({ type: 'message', from: username, message: msg.message, timestamp: new Date().toLocaleTimeString() }));
         }
       }

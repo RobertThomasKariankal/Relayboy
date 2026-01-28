@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+/* RelayBoy Chat - Bold Dark Theme with Coral Accents */
+
+@layer base {
+  :root {
+    --background: 250 20% 6%;
+    --foreground: 0 0% 98%;
+
+    --card: 250 18% 10%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 250 18% 10%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 350 80% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 250 15% 16%;
+    --secondary-foreground: 0 0% 95%;
+
+    --muted: 250 12% 20%;
+    --muted-foreground: 250 10% 60%;
+
+    --accent: 350 85% 55%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 250 15% 18%;
+    --input: 250 15% 14%;
+    --ring: 350 80% 60%;
+
+    --radius: 0.75rem;
+
+    /* Custom RelayBoy tokens */
+    --chat-bubble-sent: 350 80% 55%;
+    --chat-bubble-received: 250 18% 14%;
+    --online-indicator: 142 70% 49%;
+    --sidebar-bg: 250 20% 8%;
+    --glass-bg: 250 20% 10%;
+    --gradient-start: 350 80% 60%;
+    --gradient-end: 320 85% 50%;
+
+    --sidebar-background: 250 20% 8%;
+    --sidebar-foreground: 0 0% 90%;
+    --sidebar-primary: 350 80% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 250 15% 16%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 250 15% 15%;
+    --sidebar-ring: 350 80% 60%;
+  }
+
+  .dark {
+    --background: 250 20% 6%;
+    --foreground: 0 0% 98%;
+    --card: 250 18% 10%;
+    --card-foreground: 0 0% 98%;
+    --popover: 250 18% 10%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 350 80% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 250 15% 16%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 250 12% 20%;
+    --muted-foreground: 250 10% 60%;
+    --accent: 350 85% 55%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 250 15% 18%;
+    --input: 250 15% 14%;
+    --ring: 350 80% 60%;
+    --sidebar-background: 250 20% 8%;
+    --sidebar-foreground: 0 0% 90%;
+    --sidebar-primary: 350 80% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 250 15% 16%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 250 15% 15%;
+    --sidebar-ring: 350 80% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', sans-serif;
+  }
+}
+
+@layer utilities {
+  .gradient-primary {
+    background: linear-gradient(135deg, hsl(var(--gradient-start)), hsl(var(--gradient-end)));
+  }
+  
+  .gradient-text {
+    background: linear-gradient(135deg, hsl(var(--gradient-start)), hsl(var(--gradient-end)));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glass {
+    background: hsl(var(--glass-bg) / 0.6);
+    backdrop-filter: blur(20px);
+    border: 1px solid hsl(var(--border) / 0.5);
+  }
+
+  .glass-card {
+    background: hsl(var(--card) / 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid hsl(var(--border) / 0.3);
+  }
+
+  .glow-primary {
+    box-shadow: 0 0 30px hsl(var(--primary) / 0.3), 0 0 60px hsl(var(--primary) / 0.1);
+  }
+
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: hsl(var(--muted) / 0.3);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
