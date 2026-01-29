@@ -234,13 +234,4 @@ wss.on('connection', async (ws, req) => {
     }
   });
 
-  ws.on('close', () => {
-    clients.delete(username);
-    console.log(`${username} disconnected`);
-    broadcastUsers();
-  });
-});
-
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+ ;
