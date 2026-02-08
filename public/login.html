@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -151,8 +152,72 @@
         .hidden {
             display: none;
         }
+
+        /* Password Strength Styles */
+        .strength-meter {
+            height: 4px;
+            width: 100%;
+            background: #1a2d47;
+            margin-top: 8px;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .strength-bar {
+            height: 100%;
+            width: 0%;
+            transition: all 0.3s;
+        }
+
+        .strength-weak {
+            background: #ff6b6b;
+            width: 25%;
+        }
+
+        .strength-fair {
+            background: #ffa502;
+            width: 50%;
+        }
+
+        .strength-good {
+            background: #2ed573;
+            width: 75%;
+        }
+
+        .strength-strong {
+            background: #1e90ff;
+            width: 100%;
+        }
+
+        .password-requirements {
+            list-style: none;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #a0a0a0;
+        }
+
+        .requirement {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 4px;
+        }
+
+        .requirement::before {
+            content: '○';
+            color: #555;
+        }
+
+        .requirement.met {
+            color: #2ed573;
+        }
+
+        .requirement.met::before {
+            content: '●';
+        }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="header">
@@ -190,6 +255,16 @@
             <div class="form-group">
                 <label for="regPassword">Password</label>
                 <input type="password" id="regPassword" placeholder="Create password" required>
+                <div class="strength-meter">
+                    <div id="strengthBar" class="strength-bar"></div>
+                </div>
+                <ul class="password-requirements">
+                    <li class="requirement" id="req-length">Min 10 characters</li>
+                    <li class="requirement" id="req-upper">One uppercase</li>
+                    <li class="requirement" id="req-lower">One lowercase</li>
+                    <li class="requirement" id="req-number">One number</li>
+                    <li class="requirement" id="req-special">One special character (!@#$%^&*)</li>
+                </ul>
             </div>
             <div class="error" id="registerError"></div>
             <div class="button-group">
@@ -208,11 +283,49 @@
             document.getElementById('registerForm').classList.toggle('hidden');
         }
 
+        const regPasswordInput = document.getElementById('regPassword');
+        const requirements = {
+            length: p => p.length >= 10,
+            upper: p => /[A-Z]/.test(p),
+            lower: p => /[a-z]/.test(p),
+            number: p => /[0-9]/.test(p),
+            special: p => /[!@#$%^&*(),.?":{}|<>]/.test(p)
+        };
+
+        regPasswordInput.addEventListener('input', () => {
+            const password = regPasswordInput.value;
+            let metCount = 0;
+
+            for (const [key, test] of Object.entries(requirements)) {
+                const isMet = test(password);
+                document.getElementById(`req-${key}`).classList.toggle('met', isMet);
+                if (isMet) metCount++;
+            }
+
+            const bar = document.getElementById('strengthBar');
+            bar.className = 'strength-bar';
+            if (metCount > 0) {
+                if (metCount <= 2) bar.classList.add('strength-weak');
+                else if (metCount === 3) bar.classList.add('strength-fair');
+                else if (metCount === 4) bar.classList.add('strength-good');
+                else if (metCount === 5) bar.classList.add('strength-strong');
+            } else {
+                bar.style.width = '0%';
+            }
+        });
+
         document.getElementById('registerForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const email = document.getElementById('regEmail').value;
             const username = document.getElementById('regUsername').value;
             const password = document.getElementById('regPassword').value;
+
+            // Final client-side check
+            const isStrong = Object.values(requirements).every(test => test(password));
+            if (!isStrong) {
+                document.getElementById('registerError').textContent = 'Please meet all password requirements';
+                return;
+            }
 
             try {
                 const res = await fetch('/register', {
@@ -248,4 +361,5 @@
         });
     </script>
 </body>
+
 </html>

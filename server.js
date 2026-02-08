@@ -15,6 +15,16 @@ const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Password Policy Validation (NIST/OWASP inspired)
+function isPasswordStrong(password) {
+  if (!password || password.length < 10) return false;
+  const hasUpper = /[A-Z]/.test(password);
+  const hasLower = /[a-z]/.test(password);
+  const hasNumber = /[0-9]/.test(password);
+  const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+  return hasUpper && hasLower && hasNumber && hasSpecial;
+}
+
 // -------------------- Supabase Setup --------------------
 // (Supabase is initialized in db.js)
 
@@ -49,6 +59,10 @@ app.get('/chat', (req, res) => {
 app.post('/register', async (req, res) => {
   const { email, username, password } = req.body;
   if (!email || !username || !password) return res.status(400).json({ error: 'Missing fields' });
+
+  if (!isPasswordStrong(password)) {
+    return res.status(400).json({ error: 'Password does not meet security requirements' });
+  }
 
   try {
     // Check if user exists
@@ -234,7 +248,8 @@ wss.on('connection', async (ws, req) => {
     }
   });
 
-  ws.on('close', () => {
+ ;
+   ws.on('close', () => {
     clients.delete(username);
     console.log(`${username} disconnected`);
     broadcastUsers();
