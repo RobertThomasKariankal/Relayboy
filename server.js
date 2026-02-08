@@ -7,6 +7,10 @@ import cookieParser from "cookie-parser";
 import session from "express-session";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
+import dns from "dns";
+
+// Force IPv4 preference for better compatibility on cloud platforms
+dns.setDefaultResultOrder("ipv4first");
 
 import { supabase } from "./db.js";
 import redis from "./redisClient.js";
