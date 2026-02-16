@@ -1,7 +1,4 @@
 import dns from "dns";
-// Force IPv4 preference at the very top to ensure it applies to all imports
-dns.setDefaultResultOrder("ipv4first");
-
 import express from "express";
 import http from "http";
 import { WebSocketServer } from "ws";
@@ -10,11 +7,12 @@ import bcrypt from "bcryptjs";
 import cookieParser from "cookie-parser";
 import session from "express-session";
 import dotenv from "dotenv";
+import sgMail from "@sendgrid/mail";
 import { fileURLToPath } from "url";
 
 import { supabase } from "./db.js";
 import redis from "./redisClient.js";
-import transporter from "./nodemailer.js";
+// Mailgun API sending (replaces SMTP)
 
 dotenv.config();
 
@@ -22,12 +20,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ---------------- Startup Checks ----------------
-const requiredEnv = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "EMAIL_USER", "EMAIL_PASS", "REDIS_URL"];
+const requiredEnv = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SENDGRID_API_KEY", "SENDGRID_FROM_EMAIL", "REDIS_URL"];
 const missingEnv = requiredEnv.filter(env => !process.env[env]);
 if (missingEnv.length > 0) {
   console.error("❌ Missing required environment variables:", missingEnv.join(", "));
   if (process.env.NODE_ENV === "production") process.exit(1);
 }
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // ---------------- dirname ----------------
 const __filename = fileURLToPath(import.meta.url);
@@ -40,7 +40,7 @@ app.use(cookieParser());
 
 const sessionParser = session({
   saveUninitialized: false,
-  secret: "relayboy_secret_change_me",
+  secret: process.env.SESSION_SECRET || "relayboy_secret_fallback",
   resave: false
 });
 app.use(sessionParser);
@@ -121,13 +121,30 @@ app.post("/register", async (req, res) => {
       JSON.stringify({ email, username, password_hash, otp })
     );
 
-    console.log(`[Registration] Sending OTP email to ${email}...`);
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
+    console.log(`[Registration] Sending OTP email to ${email} via SendGrid...`);
+
+    const msg = {
       to: email,
+      from: process.env.SENDGRID_FROM_EMAIL,
       subject: "RelayBoy Email Verification",
-      text: `Your OTP is ${otp}. Valid for 5 minutes.`
-    });
+      text: `Your OTP is ${otp}. Valid for 5 minutes.`,
+      html: `<p>Your OTP is <strong>${otp}</strong>. Valid for 5 minutes.</p>`,
+    };
+
+    try {
+      await sgMail.send(msg);
+      console.log("[Registration] OTP sent successfully via SendGrid");
+    } catch (sendgridError) {
+      console.error("[Registration] SendGrid error:", sendgridError.response ? sendgridError.response.body : sendgridError.message);
+      console.log("------------------------------------------");
+      console.log(`[DEV FALLBACK] OTP for ${email} is: ${otp}`);
+      console.log("------------------------------------------");
+
+      // We continue with success status so the user can use the terminal fallback OTP
+      if (process.env.NODE_ENV === "production") {
+        return res.status(500).json({ error: "Email send failed" });
+      }
+    }
 
     console.log("[Registration] OTP sent successfully");
     res.json({ ok: true });
