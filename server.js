@@ -50,7 +50,7 @@ const sessionParser = session({
 });
 app.use(sessionParser);
 
-app.use("/static", express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, "dist")));
 
 // ---------------- Utils ----------------
 async function withRetry(fn, retries = 3, delay = 1000) {
@@ -81,19 +81,23 @@ function isPasswordStrong(password) {
 }
 
 // ---------------- Pages ----------------
-app.get("/", (_, res) => res.redirect("/login"));
+// Legacy routes served by the SPA now, but we keep the /chat check if needed
+// or just let the React app handle everything.
+app.get("/login", (_, res) => res.sendFile(path.join(__dirname, "dist/index.html")));
+app.get("/chat", (req, res) => res.sendFile(path.join(__dirname, "dist/index.html")));
+app.get("/verify-otp", (_, res) => res.sendFile(path.join(__dirname, "dist/index.html")));
 
-app.get("/login", (_, res) =>
-  res.sendFile(path.join(__dirname, "public/login.html"))
-);
-
-app.get("/verify-otp.html", (_, res) =>
-  res.sendFile(path.join(__dirname, "public/verify-otp.html"))
-);
-
-app.get("/chat", (req, res) => {
-  if (!req.session.authenticated) return res.redirect("/login");
-  res.sendFile(path.join(__dirname, "public/index.html"));
+// ---------------- Catch-all for SPA ----------------
+// Use middleware for the catch-all to avoid Express 5 path-to-regexp parsing issues
+app.use((req, res, next) => {
+  // Only handle GET requests that aren't for API, users, or websocket
+  if (req.method === "GET" &&
+    !req.path.startsWith("/api") &&
+    !req.path.startsWith("/users") &&
+    !req.path.startsWith("/ws")) {
+    return res.sendFile(path.join(__dirname, "dist/index.html"));
+  }
+  next();
 });
 
 // ---------------- REGISTER (SEND OTP) ----------------
