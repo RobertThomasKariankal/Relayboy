@@ -441,21 +441,23 @@ wss.on("connection", async (ws, req) => {
     avatar_url: req.session.avatar_url
   }));
 
-  // 1. Mark user as online in DB (only if first tab)
-  const isFirstTab = !clients.has(username) || clients.get(username).size === 0;
+  const userKey = username.toLowerCase();
 
-  if (!clients.has(username)) {
-    clients.set(username, new Set());
+  // 1. Mark user as online in DB (only if first tab)
+  const isFirstTab = !clients.has(userKey) || clients.get(userKey).size === 0;
+
+  if (!clients.has(userKey)) {
+    clients.set(userKey, new Set());
   }
-  clients.get(username).add(ws);
+  clients.get(userKey).add(ws);
 
   if (isFirstTab) {
-    console.log(`[Presence] Marking ${username} as ONLINE (First connection)`);
+    console.log(`[Presence] Marking ${userKey} as ONLINE (First connection)`);
     await withRetry(() =>
       supabase
         .from("users")
         .update({ is_online: true, last_login: new Date().toISOString() })
-        .eq("username", username)
+        .eq("username", userKey)
     );
     console.log(`[Presence] Broadcasting online users...`);
     broadcastUsers();
@@ -467,7 +469,7 @@ wss.on("connection", async (ws, req) => {
       supabase
         .from("messages")
         .select("from, is_seen")
-        .eq("to", username)
+        .eq("to", userKey)
         .eq("is_seen", false)
     );
 
@@ -494,16 +496,20 @@ wss.on("connection", async (ws, req) => {
       console.log(`📩 Received WS message: ${data.type} from ${username}`);
 
       if (data.type === "message") {
-        const { error: insertError } = await withRetry(() =>
+        const isEncrypted = data.message.startsWith("QE1:");
+        const { data: insertedData, error: insertError } = await withRetry(() =>
           supabase
             .from("messages")
             .insert([{
               from: username,
-              to: data.to,
+              to: data.to.toLowerCase(),
               message: data.message,
               timestamp: new Date().toISOString(),
-              is_seen: false
+              is_seen: false,
+              encrypted: isEncrypted
             }])
+            .select() // Get the inserted row back with its ID
+            .single()
         );
 
         if (insertError) {
@@ -511,23 +517,27 @@ wss.on("connection", async (ws, req) => {
           return;
         }
 
-        console.log(`✅ Message saved from ${username} to ${data.to}`);
+        const msgRow = insertedData;
+        console.log(`✅ Message saved (ID: ${msgRow.id}) from ${username} to ${msgRow.to}`);
 
-        const targetSockets = clients.get(data.to);
+        const targetSockets = clients.get(msgRow.to);
         if (targetSockets) {
           targetSockets.forEach(target => {
             if (target.readyState === 1) {
               target.send(JSON.stringify({
                 type: "message",
+                id: msgRow.id,
                 from: username,
-                message: data.message,
-                timestamp: new Date().toISOString()
+                message: msgRow.message,
+                timestamp: msgRow.timestamp,
+                encrypted: msgRow.encrypted
               }));
             }
           });
         }
       } else if (data.type === "typing") {
-        const targetSockets = clients.get(data.to);
+        const targetKey = data.to.toLowerCase();
+        const targetSockets = clients.get(targetKey);
         if (targetSockets) {
           targetSockets.forEach(target => {
             if (target.readyState === 1) {
@@ -539,19 +549,20 @@ wss.on("connection", async (ws, req) => {
           });
         }
       } else if (data.type === "seen") {
+        const targetKey = data.to.toLowerCase();
         // Persist seen status in DB
         const { error: seenError } = await withRetry(() =>
           supabase
             .from("messages")
             .update({ is_seen: true })
-            .eq("from", data.to)
-            .eq("to", username)
+            .eq("from", targetKey)
+            .eq("to", username.toLowerCase())
             .eq("is_seen", false)
         );
 
         if (seenError) console.error("❌ Seen update error:", seenError);
 
-        const targetSockets = clients.get(data.to);
+        const targetSockets = clients.get(targetKey);
         if (targetSockets) {
           targetSockets.forEach(target => {
             if (target.readyState === 1) {
@@ -564,7 +575,9 @@ wss.on("connection", async (ws, req) => {
         }
       }
       else if (data.type === "get_history") {
-        console.log(`📜 Fetching history between ${username} and ${data.to}`);
+        const peerKey = data.to.toLowerCase();
+        const myKey = username.toLowerCase();
+        console.log(`📜 Fetching history between ${myKey} and ${peerKey}`);
 
         // ---- KYBER HANDSHAKE: Establish shared secret ----
         let sharedSecretBase64 = null;
@@ -574,7 +587,7 @@ wss.on("connection", async (ws, req) => {
             supabase
               .from("handshakes")
               .select("shared_secret")
-              .or(`and(sender.eq."${username}",receiver.eq."${data.to}"),and(sender.eq."${data.to}",receiver.eq."${username}")`)
+              .or(`and(sender.eq."${myKey}",receiver.eq."${peerKey}"),and(sender.eq."${peerKey}",receiver.eq."${myKey}")`)
               .limit(1)
           );
 
@@ -651,7 +664,7 @@ wss.on("connection", async (ws, req) => {
           supabase
             .from("messages")
             .select("*")
-            .or(`and(from.eq."${username}",to.eq."${data.to}"),and(from.eq."${data.to}",to.eq."${username}")`)
+            .or(`and(from.eq."${myKey}",to.eq."${peerKey}"),and(from.eq."${peerKey}",to.eq."${myKey}")`)
             .order("timestamp", { ascending: true })
         );
 
@@ -664,10 +677,12 @@ wss.on("connection", async (ws, req) => {
           with: data.to,
           shared_secret: sharedSecretBase64,
           messages: (history || []).map(m => ({
+            id: m.id,
             from: m.from,
             message: m.message,
             timestamp: m.timestamp,
-            is_seen: m.is_seen
+            is_seen: m.is_seen,
+            encrypted: m.encrypted
           }))
         }));
       }
@@ -677,19 +692,20 @@ wss.on("connection", async (ws, req) => {
   });
 
   ws.on("close", async () => {
-    const userSockets = clients.get(username);
+    const userKey = username.toLowerCase();
+    const userSockets = clients.get(userKey);
     if (userSockets) {
       userSockets.delete(ws);
       if (userSockets.size === 0) {
-        clients.delete(username);
+        clients.delete(userKey);
         // Mark user as offline in DB ONLY if all tabs closed
-        console.log(`[Presence] Marking ${username} as OFFLINE (Last tab closed)`);
+        console.log(`[Presence] Marking ${userKey} as OFFLINE (Last tab closed)`);
         try {
           await withRetry(() =>
             supabase
               .from("users")
               .update({ is_online: false })
-              .eq("username", username)
+              .eq("username", userKey)
           );
           console.log(`[Presence] ${username} is now offline in DB`);
           broadcastUsers();

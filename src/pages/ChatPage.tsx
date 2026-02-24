@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "next-themes";
-import { supabase } from "@/../db.js";
+import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 interface ChatHistory {
   [user: string]: ChatMessage[];
@@ -171,10 +171,10 @@ export default function ChatPage() {
     }
   };
 
-  const handleSendMessage = (message: string) => {
+  const handleSendMessage = async (message: string) => {
     if (!currentChat || !username) return;
 
-    const success = sendMessage(currentChat, message);
+    const success = await sendMessage(currentChat, message);
     if (success) {
       const newMessage: ChatMessage = {
         from: username,
