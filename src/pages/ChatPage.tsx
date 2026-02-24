@@ -41,6 +41,9 @@ export default function ChatPage() {
   const [uploading, setUploading] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<'recent' | 'online'>('recent');
   const [recentChats, setRecentChats] = useState<{ username: string, last_message: string, avatar_url: string | null, is_online?: boolean }[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{ username: string, avatar_url?: string }[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -98,6 +101,30 @@ export default function ChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory, currentChat]);
+
+  // Combined Search Logic
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (searchQuery.trim()) {
+        try {
+          setIsSearching(true);
+          const res = await fetch(`/users/search?q=${encodeURIComponent(searchQuery)}`);
+          if (res.ok) {
+            const data = await res.json();
+            setSearchResults(data);
+          }
+        } catch (err) {
+          console.error("Search failed:", err);
+        } finally {
+          setIsSearching(false);
+        }
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const handleLogout = async () => {
     try {
@@ -395,12 +422,22 @@ export default function ChatPage() {
                 <input
                   type="text"
                   placeholder="Search users..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full h-11 pl-11 pr-4 glass-input rounded-2xl text-sm focus:outline-none focus:ring-1 focus:ring-primary/30"
                 />
               </div>
 
               <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4 ml-1">
-                {sidebarTab === 'online' ? (
+                {searchQuery.trim() ? (
+                  <>
+                    <Search className="w-4 h-4" />
+                    Search Results
+                    <span className="ml-auto bg-primary/10 text-primary px-3 py-1 rounded-full text-[10px]">
+                      {searchResults.length}
+                    </span>
+                  </>
+                ) : sidebarTab === 'online' ? (
                   <>
                     <Users className="w-4 h-4" />
                     Online Now
@@ -421,21 +458,25 @@ export default function ChatPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-3 pb-4 space-y-1 scrollbar-thin">
-              {(sidebarTab === 'online' ? otherUsers : recentChats).length === 0 ? (
+              {isSearching ? (
+                <div className="flex justify-center p-8">
+                  <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (searchQuery.trim() ? searchResults : (sidebarTab === 'online' ? otherUsers : recentChats)).length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-40 text-center px-6">
                   <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-4 opacity-40">
-                    {sidebarTab === 'online' ? <Users className="w-6 h-6 text-muted-foreground" /> : <MessageSquare className="w-6 h-6 text-muted-foreground" />}
+                    {searchQuery.trim() ? <Search className="w-6 h-6 text-muted-foreground" /> : sidebarTab === 'online' ? <Users className="w-6 h-6 text-muted-foreground" /> : <MessageSquare className="w-6 h-6 text-muted-foreground" />}
                   </div>
                   <p className="text-sm text-muted-foreground font-medium">
-                    {sidebarTab === 'online' ? "Silence is golden..." : "No recent chats"}
+                    {searchQuery.trim() ? "No users found" : sidebarTab === 'online' ? "Silence is golden..." : "No recent chats"}
                   </p>
                   <p className="text-xs text-muted-foreground/50 mt-1">
-                    {sidebarTab === 'online' ? "Wait for others to join the party" : "Start a conversation to see it here"}
+                    {searchQuery.trim() ? "Try a different keyword" : sidebarTab === 'online' ? "Wait for others to join the party" : "Start a conversation to see it here"}
                   </p>
                 </div>
               ) : (
                 <AnimatePresence mode="wait">
-                  {(sidebarTab === 'online' ? otherUsers : recentChats).map((user, idx) => (
+                  {(searchQuery.trim() ? searchResults : (sidebarTab === 'online' ? otherUsers : recentChats)).map((user, idx) => (
                     <motion.div
                       key={user.username}
                       initial={{ opacity: 0, x: -10 }}

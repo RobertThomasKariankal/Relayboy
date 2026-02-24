@@ -506,7 +506,7 @@ wss.on("connection", async (ws, req) => {
             .from("messages")
             .insert([{
               from: username,
-              to: data.to.toLowerCase(),
+              to: data.to,
               message: data.message,
               timestamp: new Date().toISOString(),
               is_seen: false,
@@ -540,7 +540,7 @@ wss.on("connection", async (ws, req) => {
           });
         }
       } else if (data.type === "typing") {
-        const targetKey = data.to.toLowerCase();
+        const targetKey = data.to;
         const targetSockets = clients.get(targetKey);
         if (targetSockets) {
           targetSockets.forEach(target => {
@@ -553,14 +553,14 @@ wss.on("connection", async (ws, req) => {
           });
         }
       } else if (data.type === "seen") {
-        const targetKey = data.to.toLowerCase();
+        const targetKey = data.to;
         // Persist seen status in DB
         const { error: seenError } = await withRetry(() =>
           supabase
             .from("messages")
             .update({ is_seen: true })
             .eq("from", targetKey)
-            .eq("to", username.toLowerCase())
+            .eq("to", username)
             .eq("is_seen", false)
         );
 
@@ -579,8 +579,8 @@ wss.on("connection", async (ws, req) => {
         }
       }
       else if (data.type === "get_history") {
-        const peerKey = data.to.toLowerCase();
-        const myKey = username.toLowerCase();
+        const peerKey = data.to;
+        const myKey = username;
         console.log(`📜 Fetching history between ${myKey} and ${peerKey}`);
 
         // ---- KYBER HANDSHAKE: Establish shared secret ----
@@ -696,7 +696,7 @@ wss.on("connection", async (ws, req) => {
   });
 
   ws.on("close", async () => {
-    const userKey = username.toLowerCase();
+    const userKey = username; // No longer forcing lowercase
     const userSockets = clients.get(userKey);
     if (userSockets) {
       userSockets.delete(ws);
