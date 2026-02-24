@@ -52,7 +52,7 @@ export function useWebSocket() {
   const usernameRef = useRef<string>("");
 
   const getOrCreateSession = async (peer: string, sharedSecret?: string) => {
-    const peerKey = peer.toLowerCase();
+    const peerKey = peer;
 
     // 1. Check existing sessions
     if (sessionsRef.current.has(peerKey)) return sessionsRef.current.get(peerKey)!;
