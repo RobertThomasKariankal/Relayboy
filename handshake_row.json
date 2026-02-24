@@ -1,0 +1,9 @@
+[
+  {
+    "id": "30965595-c5ea-4dff-9c1c-e10fa21e41c4",
+    "sender": "test_sender",
+    "receiver": "test_receiver",
+    "ciphertext": "test_ciphertext",
+    "created_at": "2026-02-24T08:47:46.705362+00:00"
+  }
+]

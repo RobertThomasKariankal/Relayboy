@@ -1,0 +1,6 @@
+{
+  "code": "23502",
+  "details": "Failing row contains (a719bb6b-77b2-4ca3-bd6f-a0f63876caab, null, null, null, 2026-02-24 08:47:32.719207+00).",
+  "hint": null,
+  "message": "null value in column \"sender\" of relation \"handshakes\" violates not-null constraint"
+}

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
 
 interface ChatInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string) => void | Promise<void>;
   disabled?: boolean;
   placeholder?: string;
 }

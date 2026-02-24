@@ -12,6 +12,11 @@ import { fileURLToPath } from "url";
 
 import { supabase } from "./db.js";
 import redis from "./redisClient.js";
+import { KyberKeyGenerator, uint8ArrayToBase64 } from "./kyber/kyber-keygen.js";
+import { KyberEncapsulator } from "./kyber/kyber-encapsulate.js";
+import { KyberDecapsulator } from "./kyber/kyber-decapsulate.js";
+import { base64ToUint8Array } from "./kyber/kyber-keygen.js";
+
 // Mailgun API sending (replaces SMTP)
 
 dotenv.config();
@@ -193,13 +198,19 @@ app.post("/verify-register-otp", async (req, res) => {
       return res.status(400).json({ error: "Invalid OTP" });
     }
 
+    console.log("[Verify OTP] Generating Kyber keys for user...");
+    const keyGen = new KyberKeyGenerator();
+    const { publicKey, privateKey } = await keyGen.generateKeyPair();
+
     console.log("[Verify OTP] Inserting user into Supabase...");
     const { error: insertError } = await withRetry(() =>
       supabase.from("users").insert([{
         email: pending.email,
         username: pending.username,
         password_hash: pending.password_hash,
-        is_verified: true
+        is_verified: true,
+        kyber_public_key: uint8ArrayToBase64(publicKey),
+        kyber_private_key: uint8ArrayToBase64(privateKey)
       }])
     );
 
@@ -430,21 +441,23 @@ wss.on("connection", async (ws, req) => {
     avatar_url: req.session.avatar_url
   }));
 
-  // 1. Mark user as online in DB (only if first tab)
-  const isFirstTab = !clients.has(username) || clients.get(username).size === 0;
+  const userKey = username.toLowerCase();
 
-  if (!clients.has(username)) {
-    clients.set(username, new Set());
+  // 1. Mark user as online in DB (only if first tab)
+  const isFirstTab = !clients.has(userKey) || clients.get(userKey).size === 0;
+
+  if (!clients.has(userKey)) {
+    clients.set(userKey, new Set());
   }
-  clients.get(username).add(ws);
+  clients.get(userKey).add(ws);
 
   if (isFirstTab) {
-    console.log(`[Presence] Marking ${username} as ONLINE (First connection)`);
+    console.log(`[Presence] Marking ${userKey} as ONLINE (First connection)`);
     await withRetry(() =>
       supabase
         .from("users")
         .update({ is_online: true, last_login: new Date().toISOString() })
-        .eq("username", username)
+        .eq("username", userKey)
     );
     console.log(`[Presence] Broadcasting online users...`);
     broadcastUsers();
@@ -456,7 +469,7 @@ wss.on("connection", async (ws, req) => {
       supabase
         .from("messages")
         .select("from, is_seen")
-        .eq("to", username)
+        .eq("to", userKey)
         .eq("is_seen", false)
     );
 
@@ -483,16 +496,20 @@ wss.on("connection", async (ws, req) => {
       console.log(`📩 Received WS message: ${data.type} from ${username}`);
 
       if (data.type === "message") {
-        const { error: insertError } = await withRetry(() =>
+        const isEncrypted = data.message.startsWith("QE1:");
+        const { data: insertedData, error: insertError } = await withRetry(() =>
           supabase
             .from("messages")
             .insert([{
               from: username,
-              to: data.to,
+              to: data.to.toLowerCase(),
               message: data.message,
               timestamp: new Date().toISOString(),
-              is_seen: false
+              is_seen: false,
+              encrypted: isEncrypted
             }])
+            .select() // Get the inserted row back with its ID
+            .single()
         );
 
         if (insertError) {
@@ -500,23 +517,27 @@ wss.on("connection", async (ws, req) => {
           return;
         }
 
-        console.log(`✅ Message saved from ${username} to ${data.to}`);
+        const msgRow = insertedData;
+        console.log(`✅ Message saved (ID: ${msgRow.id}) from ${username} to ${msgRow.to}`);
 
-        const targetSockets = clients.get(data.to);
+        const targetSockets = clients.get(msgRow.to);
         if (targetSockets) {
           targetSockets.forEach(target => {
             if (target.readyState === 1) {
               target.send(JSON.stringify({
                 type: "message",
+                id: msgRow.id,
                 from: username,
-                message: data.message,
-                timestamp: new Date().toISOString()
+                message: msgRow.message,
+                timestamp: msgRow.timestamp,
+                encrypted: msgRow.encrypted
               }));
             }
           });
         }
       } else if (data.type === "typing") {
-        const targetSockets = clients.get(data.to);
+        const targetKey = data.to.toLowerCase();
+        const targetSockets = clients.get(targetKey);
         if (targetSockets) {
           targetSockets.forEach(target => {
             if (target.readyState === 1) {
@@ -528,19 +549,20 @@ wss.on("connection", async (ws, req) => {
           });
         }
       } else if (data.type === "seen") {
+        const targetKey = data.to.toLowerCase();
         // Persist seen status in DB
         const { error: seenError } = await withRetry(() =>
           supabase
             .from("messages")
             .update({ is_seen: true })
-            .eq("from", data.to)
-            .eq("to", username)
+            .eq("from", targetKey)
+            .eq("to", username.toLowerCase())
             .eq("is_seen", false)
         );
 
         if (seenError) console.error("❌ Seen update error:", seenError);
 
-        const targetSockets = clients.get(data.to);
+        const targetSockets = clients.get(targetKey);
         if (targetSockets) {
           targetSockets.forEach(target => {
             if (target.readyState === 1) {
@@ -553,13 +575,96 @@ wss.on("connection", async (ws, req) => {
         }
       }
       else if (data.type === "get_history") {
-        console.log(`📜 Fetching history between ${username} and ${data.to}`);
-        // Fetch history with retry
+        const peerKey = data.to.toLowerCase();
+        const myKey = username.toLowerCase();
+        console.log(`📜 Fetching history between ${myKey} and ${peerKey}`);
+
+        // ---- KYBER HANDSHAKE: Establish shared secret ----
+        let sharedSecretBase64 = null;
+        try {
+          // Check if a handshake already exists between these two users (in either direction)
+          const { data: existingHandshake, error: hsError } = await withRetry(() =>
+            supabase
+              .from("handshakes")
+              .select("shared_secret")
+              .or(`and(sender.eq."${myKey}",receiver.eq."${peerKey}"),and(sender.eq."${peerKey}",receiver.eq."${myKey}")`)
+              .limit(1)
+          );
+
+          if (hsError) {
+            console.error("❌ Handshake lookup error:", hsError);
+          } else if (existingHandshake && existingHandshake.length > 0 && existingHandshake[0].shared_secret) {
+            // Handshake already exists — reuse the shared secret
+            sharedSecretBase64 = existingHandshake[0].shared_secret;
+            console.log(`🔗 Existing handshake found between ${username} and ${data.to}`);
+          } else {
+            // No handshake — perform Kyber encapsulation/decapsulation
+            console.log(`🤝 No handshake found. Initiating Kyber key exchange for ${username} ↔ ${data.to}`);
+
+            // Fetch recipient's public key and private key
+            const { data: recipientData, error: recipientError } = await withRetry(() =>
+              supabase
+                .from("users")
+                .select("kyber_public_key, kyber_private_key")
+                .eq("username", data.to)
+                .limit(1)
+            );
+
+            if (recipientError || !recipientData || recipientData.length === 0) {
+              console.error("❌ Could not fetch recipient Kyber keys:", recipientError);
+            } else if (!recipientData[0].kyber_public_key || !recipientData[0].kyber_private_key) {
+              console.warn(`⚠️ Recipient ${data.to} has no Kyber keys. Skipping handshake.`);
+            } else {
+              const recipientPubKey = base64ToUint8Array(recipientData[0].kyber_public_key);
+              const recipientPrivKey = base64ToUint8Array(recipientData[0].kyber_private_key);
+
+              // Step 1: Encapsulate using recipient's public key
+              const encapsulator = new KyberEncapsulator();
+              const { ciphertext, sharedSecret: senderSecret } = await encapsulator.encapsulate(recipientPubKey);
+
+              // Step 2: Decapsulate using recipient's private key (verification)
+              const decapsulator = new KyberDecapsulator();
+              const receiverSecret = await decapsulator.decapsulate(ciphertext, recipientPrivKey);
+
+              // Convert to Base64
+              const senderSecretB64 = uint8ArrayToBase64(senderSecret);
+              const receiverSecretB64 = uint8ArrayToBase64(receiverSecret);
+              const ciphertextB64 = uint8ArrayToBase64(ciphertext);
+
+              if (senderSecretB64 === receiverSecretB64) {
+                console.log(`✅ Shared secrets match! Handshake verified for ${username} ↔ ${data.to}`);
+                sharedSecretBase64 = senderSecretB64;
+
+                // Store handshake in Supabase
+                const { error: insertHsError } = await withRetry(() =>
+                  supabase.from("handshakes").insert([{
+                    sender: username,
+                    receiver: data.to,
+                    ciphertext: ciphertextB64,
+                    shared_secret: sharedSecretBase64
+                  }])
+                );
+
+                if (insertHsError) {
+                  console.error("❌ Failed to store handshake:", insertHsError);
+                } else {
+                  console.log(`🔐 Handshake stored successfully for ${username} ↔ ${data.to}`);
+                }
+              } else {
+                console.error("❌ Shared secret mismatch! Handshake FAILED.");
+              }
+            }
+          }
+        } catch (hsErr) {
+          console.error("⚠️ Handshake process error:", hsErr);
+        }
+
+        // ---- Fetch chat history ----
         const { data: history, error: historyError } = await withRetry(() =>
           supabase
             .from("messages")
             .select("*")
-            .or(`and(from.eq."${username}",to.eq."${data.to}"),and(from.eq."${data.to}",to.eq."${username}")`)
+            .or(`and(from.eq."${myKey}",to.eq."${peerKey}"),and(from.eq."${peerKey}",to.eq."${myKey}")`)
             .order("timestamp", { ascending: true })
         );
 
@@ -570,11 +675,14 @@ wss.on("connection", async (ws, req) => {
         ws.send(JSON.stringify({
           type: "history",
           with: data.to,
+          shared_secret: sharedSecretBase64,
           messages: (history || []).map(m => ({
+            id: m.id,
             from: m.from,
             message: m.message,
             timestamp: m.timestamp,
-            is_seen: m.is_seen
+            is_seen: m.is_seen,
+            encrypted: m.encrypted
           }))
         }));
       }
@@ -584,19 +692,20 @@ wss.on("connection", async (ws, req) => {
   });
 
   ws.on("close", async () => {
-    const userSockets = clients.get(username);
+    const userKey = username.toLowerCase();
+    const userSockets = clients.get(userKey);
     if (userSockets) {
       userSockets.delete(ws);
       if (userSockets.size === 0) {
-        clients.delete(username);
+        clients.delete(userKey);
         // Mark user as offline in DB ONLY if all tabs closed
-        console.log(`[Presence] Marking ${username} as OFFLINE (Last tab closed)`);
+        console.log(`[Presence] Marking ${userKey} as OFFLINE (Last tab closed)`);
         try {
           await withRetry(() =>
             supabase
               .from("users")
               .update({ is_online: false })
-              .eq("username", username)
+              .eq("username", userKey)
           );
           console.log(`[Presence] ${username} is now offline in DB`);
           broadcastUsers();
