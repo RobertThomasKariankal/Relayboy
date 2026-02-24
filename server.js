@@ -696,7 +696,7 @@ wss.on("connection", async (ws, req) => {
   });
 
   ws.on("close", async () => {
-    const userKey = username.toLowerCase();
+    const userKey = username; // No longer forcing lowercase
     const userSockets = clients.get(userKey);
     if (userSockets) {
       userSockets.delete(ws);
