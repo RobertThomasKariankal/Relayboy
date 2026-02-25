@@ -69,6 +69,10 @@ function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+function normalizeUsername(value) {
+  return String(value || "").toLowerCase();
+}
+
 function isPasswordStrong(password) {
   return (
     password &&
@@ -300,10 +304,12 @@ app.post("/logout", async (req, res) => {
       );
 
       // Force close all WS connections for this user if they exist
-      const userSockets = clients.get(username);
+      const socketKey = normalizeUsername(username);
+      clearPendingOffline(socketKey);
+      const userSockets = clients.get(socketKey);
       if (userSockets) {
         userSockets.forEach(ws => ws.close());
-        clients.delete(username);
+        clients.delete(socketKey);
       }
 
       broadcastUsers();
@@ -396,7 +402,42 @@ app.get("/users/recent-chats", async (req, res) => {
 // ---------------- WEBSOCKET ----------------
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
-const clients = new Map(); // username -> Set(WebSocket)
+const clients = new Map(); // normalized username -> Set(WebSocket)
+const pendingOfflineTimers = new Map(); // normalized username -> timeout handle
+
+function clearPendingOffline(socketKey) {
+  const timer = pendingOfflineTimers.get(socketKey);
+  if (timer) {
+    clearTimeout(timer);
+    pendingOfflineTimers.delete(socketKey);
+  }
+}
+
+function scheduleOfflineUpdate(username, socketKey) {
+  clearPendingOffline(socketKey);
+  const timer = setTimeout(async () => {
+    pendingOfflineTimers.delete(socketKey);
+    const sockets = clients.get(socketKey);
+    if (sockets && sockets.size > 0) {
+      return;
+    }
+
+    console.log(`[Presence] Marking ${username} as OFFLINE (No active sockets)`);
+    try {
+      await withRetry(() =>
+        supabase
+          .from("users")
+          .update({ is_online: false })
+          .eq("username", username)
+      );
+      console.log(`[Presence] ${username} is now offline in DB`);
+      broadcastUsers();
+    } catch (err) {
+      console.error(`[Presence] Failed to mark ${username} as offline:`, err);
+    }
+  }, 1500);
+  pendingOfflineTimers.set(socketKey, timer);
+}
 
 async function broadcastUsers() {
   try {
@@ -435,6 +476,12 @@ wss.on("error", err => console.error("⚠️ WSS Error:", err));
 
 wss.on("connection", async (ws, req) => {
   const username = req.session.username;
+  if (!username) {
+    ws.close();
+    return;
+  }
+  const socketKey = normalizeUsername(username);
+  clearPendingOffline(socketKey);
 
   ws.on("error", err => console.error(`⚠️ WS Error for ${username}:`, err));
 
@@ -445,27 +492,21 @@ wss.on("connection", async (ws, req) => {
     avatar_url: req.session.avatar_url
   }));
 
-  const userKey = username.toLowerCase();
-
-  // 1. Mark user as online in DB (only if first tab)
-  const isFirstTab = !clients.has(userKey) || clients.get(userKey).size === 0;
-
-  if (!clients.has(userKey)) {
-    clients.set(userKey, new Set());
+  if (!clients.has(socketKey)) {
+    clients.set(socketKey, new Set());
   }
-  clients.get(userKey).add(ws);
+  clients.get(socketKey).add(ws);
 
-  if (isFirstTab) {
-    console.log(`[Presence] Marking ${userKey} as ONLINE (First connection)`);
-    await withRetry(() =>
-      supabase
-        .from("users")
-        .update({ is_online: true, last_login: new Date().toISOString() })
-        .eq("username", userKey)
-    );
-    console.log(`[Presence] Broadcasting online users...`);
-    broadcastUsers();
-  }
+  // Mark online on every fresh WS connection to recover from stale/offline states.
+  console.log(`[Presence] Marking ${username} as ONLINE`);
+  await withRetry(() =>
+    supabase
+      .from("users")
+      .update({ is_online: true, last_login: new Date().toISOString() })
+      .eq("username", username)
+  );
+  console.log(`[Presence] Broadcasting online users...`);
+  broadcastUsers();
 
   // 3. Fetch accurate unread counts from DB
   try {
@@ -473,7 +514,7 @@ wss.on("connection", async (ws, req) => {
       supabase
         .from("messages")
         .select("from, is_seen")
-        .eq("to", userKey)
+        .eq("to", username)
         .eq("is_seen", false)
     );
 
@@ -531,7 +572,7 @@ wss.on("connection", async (ws, req) => {
         const msgRow = insertedData;
         console.log(`✅ Message saved (ID: ${msgRow.id}) from ${username} to ${msgRow.to}`);
 
-        const targetSockets = clients.get(msgRow.to);
+        const targetSockets = clients.get(normalizeUsername(msgRow.to));
         if (targetSockets) {
           targetSockets.forEach(target => {
             if (target.readyState === 1) {
@@ -547,7 +588,7 @@ wss.on("connection", async (ws, req) => {
           });
         }
       } else if (data.type === "typing") {
-        const targetKey = data.to;
+        const targetKey = normalizeUsername(data.to);
         const targetSockets = clients.get(targetKey);
         if (targetSockets) {
           targetSockets.forEach(target => {
@@ -560,13 +601,14 @@ wss.on("connection", async (ws, req) => {
           });
         }
       } else if (data.type === "seen") {
-        const targetKey = data.to;
+        const targetUsername = data.to;
+        const targetKey = normalizeUsername(targetUsername);
         // Persist seen status in DB
         const { error: seenError } = await withRetry(() =>
           supabase
             .from("messages")
             .update({ is_seen: true })
-            .eq("from", targetKey)
+            .eq("from", targetUsername)
             .eq("to", username)
             .eq("is_seen", false)
         );
@@ -719,26 +761,13 @@ wss.on("connection", async (ws, req) => {
   });
 
   ws.on("close", async () => {
-    const userKey = username; // No longer forcing lowercase
-    const userSockets = clients.get(userKey);
+    const userSockets = clients.get(socketKey);
     if (userSockets) {
       userSockets.delete(ws);
       if (userSockets.size === 0) {
-        clients.delete(userKey);
-        // Mark user as offline in DB ONLY if all tabs closed
-        console.log(`[Presence] Marking ${userKey} as OFFLINE (Last tab closed)`);
-        try {
-          await withRetry(() =>
-            supabase
-              .from("users")
-              .update({ is_online: false })
-              .eq("username", userKey)
-          );
-          console.log(`[Presence] ${username} is now offline in DB`);
-          broadcastUsers();
-        } catch (err) {
-          console.error(`[Presence] Failed to mark ${username} as offline:`, err);
-        }
+        clients.delete(socketKey);
+        // Delay offline transition to avoid refresh races.
+        scheduleOfflineUpdate(username, socketKey);
       }
     }
   });
