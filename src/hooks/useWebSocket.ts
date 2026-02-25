@@ -45,12 +45,8 @@ export function useWebSocket() {
   const [incomingMessage, setIncomingMessage] = useState<ChatMessage | null>(null);
   const [history, setHistory] = useState<{ with: string; messages: ChatMessage[]; shared_secret?: string } | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<{ [user: string]: number }>({});
-<<<<<<< HEAD
-  const [seenEvent, setSeenEvent] = useState<{ from: string; at: number } | null>(null);
-  const [reconnectAttempt, setReconnectAttempt] = useState(0);
-=======
   const [seenBy, setSeenBy] = useState<{ from: string; at: number } | null>(null);
->>>>>>> 9d884d1 (notification fixed)
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
   const socketRef = useRef<WebSocket | null>(null);
   const sessionsRef = useRef<Map<string, CryptoSession>>(new Map());
@@ -177,11 +173,7 @@ export function useWebSocket() {
       }
 
       if (data.type === "seen" && data.from) {
-<<<<<<< HEAD
-        setSeenEvent({ from: data.from, at: Date.now() });
-=======
         setSeenBy({ from: data.from, at: Date.now() });
->>>>>>> 9d884d1 (notification fixed)
       }
 
       if (data.type === "history" && data.with && data.messages) {
@@ -310,7 +302,6 @@ export function useWebSocket() {
     history,
     seenBy,
     unreadCounts,
-    seenEvent,
     reconnectAttempt,
     setUnreadCounts,
     connect,

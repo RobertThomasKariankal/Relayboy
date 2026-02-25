@@ -49,29 +49,9 @@ export default function ChatPage() {
   const { theme, setTheme } = useTheme();
 
   const {
-<<<<<<< HEAD
-    status,
-    username,
-    avatarUrl,
-    setAvatarUrl,
-    users,
-    error,
-    incomingMessage,
-    history,
-    unreadCounts,
-    seenEvent,
-    reconnectAttempt,
-    setUnreadCounts,
-    connect,
-    sendMessage,
-    getHistory,
-    sendSeen,
-    disconnect,
-=======
     status, username, avatarUrl, setAvatarUrl, users,
-    error, incomingMessage, history, seenBy, unreadCounts, setUnreadCounts,
-    connect, sendMessage, getHistory, sendSeen, disconnect
->>>>>>> 9d884d1 (notification fixed)
+    error, incomingMessage, history, seenBy, unreadCounts, reconnectAttempt, setUnreadCounts,
+    connect, sendMessage, getHistory, sendSeen, disconnect,
   } = useWebSocket();
 
   const [currentChat, setCurrentChat] = useState<string | null>(null);
@@ -126,31 +106,24 @@ export default function ChatPage() {
     fetchRecentChats();
   }, [connect]);
 
-<<<<<<< HEAD
-  useEffect(() => {
-    if (incomingMessage) {
-      const fromName = incomingMessage.from;
-      const fromKey = normalizeName(fromName);
-=======
   useEffect(() => {
     currentChatRef.current = currentChat;
   }, [currentChat]);
 
-  // Handle incoming messages (process each once)
   useEffect(() => {
     if (incomingMessage) {
       const dedupeKey = String(incomingMessage.id ?? `${incomingMessage.from}|${incomingMessage.timestamp}|${incomingMessage.message}`);
       if (lastIncomingKeyRef.current === dedupeKey) return;
       lastIncomingKeyRef.current = dedupeKey;
->>>>>>> 9d884d1 (notification fixed)
+      const fromName = incomingMessage.from;
+      const fromKey = normalizeName(fromName);
 
       setChatHistory((prev) => ({
         ...prev,
         [fromName]: [...(prev[fromName] || []), incomingMessage],
       }));
 
-<<<<<<< HEAD
-      if (currentChat && normalizeName(currentChat) === fromKey) {
+      if (currentChatRef.current && normalizeName(currentChatRef.current) === fromKey) {
         sendSeen(fromName);
         setUnreadCounts((prev) => {
           const next = { ...prev };
@@ -158,11 +131,6 @@ export default function ChatPage() {
           delete next[fromKey];
           return next;
         });
-=======
-      // If message is from current chat, mark as seen immediately
-      if (currentChatRef.current === incomingMessage.from) {
-        sendSeen(incomingMessage.from);
->>>>>>> 9d884d1 (notification fixed)
       } else {
         setUnreadCounts((prev) => ({
           ...prev,
@@ -211,22 +179,6 @@ export default function ChatPage() {
       };
     });
   }, [seenBy, username]);
-
-  useEffect(() => {
-    if (seenEvent && username) {
-      setChatHistory((prev) => {
-        const next: ChatHistory = { ...prev };
-        const matchKey = normalizeName(seenEvent.from);
-
-        Object.entries(next).forEach(([peer, messages]) => {
-          if (normalizeName(peer) !== matchKey) return;
-          next[peer] = messages.map((msg) => (msg.from === username ? { ...msg, is_seen: true } : msg));
-        });
-
-        return next;
-      });
-    }
-  }, [seenEvent, username]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -342,20 +294,6 @@ export default function ChatPage() {
     }));
 
     const success = await sendMessage(currentChat, message);
-<<<<<<< HEAD
-    if (success) {
-      const newMessage: ChatMessage = {
-        from: username,
-        message,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      };
-
-      setChatHistory((prev) => ({
-        ...prev,
-        [currentChat]: [...(prev[currentChat] || []), newMessage],
-      }));
-    }
-=======
     setChatHistory((prev) => ({
       ...prev,
       [currentChat]: (prev[currentChat] || []).map((m) => {
@@ -366,7 +304,6 @@ export default function ChatPage() {
         };
       }),
     }));
->>>>>>> 9d884d1 (notification fixed)
   };
 
   const openChat = (user: string) => {
@@ -610,11 +547,7 @@ export default function ChatPage() {
                   ) : (
                     currentMessages.map((msg, index) => (
                       <ChatBubble
-<<<<<<< HEAD
-                        key={msg.id ?? index}
-=======
-                        key={String(msg.id ?? `${msg.from}-${msg.timestamp}-${i}`)}
->>>>>>> 9d884d1 (notification fixed)
+                        key={String(msg.id ?? `${msg.from}-${msg.timestamp}-${index}`)}
                         message={msg.message}
                         timestamp={msg.timestamp}
                         isSent={msg.from === username}

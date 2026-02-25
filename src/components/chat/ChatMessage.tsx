@@ -37,12 +37,6 @@ export function ChatMessage({ message, timestamp, isSent, senderName, isSeen, de
         >
           {message}
         </div>
-<<<<<<< HEAD
-
-        <div className="mt-1 px-1.5 text-[10px] text-muted-foreground font-semibold flex items-center gap-1.5">
-          <span>{timestamp}</span>
-          {isSent ? <span>{isSeen ? "Seen" : "Sent"}</span> : null}
-=======
         <div className="flex items-center gap-1.5 mt-1.5 px-2">
           <span className="text-[10px] text-muted-foreground/60 font-semibold">
             {timestamp}
@@ -66,7 +60,6 @@ export function ChatMessage({ message, timestamp, isSent, senderName, isSeen, de
               )}
             </div>
           )}
->>>>>>> 9d884d1 (notification fixed)
         </div>
       </div>
     </motion.div>
