@@ -24,7 +24,7 @@ interface WSMessage {
   error?: string;
   shared_secret?: string;
   with?: string;
-  messages?: unknown[];
+  messages?: any[];
   counts?: { [user: string]: number };
   encrypted?: boolean;
 }
@@ -44,36 +44,30 @@ export function useWebSocket() {
   const [incomingMessage, setIncomingMessage] = useState<ChatMessage | null>(null);
   const [history, setHistory] = useState<{ with: string; messages: ChatMessage[]; shared_secret?: string } | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<{ [user: string]: number }>({});
-  const [seenEvent, setSeenEvent] = useState<{ from: string; at: number } | null>(null);
-  const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
   const socketRef = useRef<WebSocket | null>(null);
   const sessionsRef = useRef<Map<string, CryptoSession>>(new Map());
   const pendingSessionsRef = useRef<Map<string, Promise<CryptoSession | null>>>(new Map());
   const processedMessageIds = useRef<Set<string | number>>(new Set());
   const usernameRef = useRef<string>("");
-  const reconnectTimeoutRef = useRef<number | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const shouldReconnectRef = useRef(true);
-
-  const clearReconnectTimer = () => {
-    if (reconnectTimeoutRef.current !== null) {
-      window.clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-  };
 
   const getOrCreateSession = async (peer: string, sharedSecret?: string) => {
-    const peerKey = peer.toLowerCase();
+    const peerKey = peer;
 
+    // 1. Check existing sessions
     if (sessionsRef.current.has(peerKey)) return sessionsRef.current.get(peerKey)!;
 
+    // 2. Check if initialization is already in progress
     if (pendingSessionsRef.current.has(peerKey)) {
       return await pendingSessionsRef.current.get(peerKey)!;
     }
 
+    // If no shared secret is provided, and no session exists or is pending, we can't create one.
+    // This might happen when trying to decrypt an incoming message for a peer we haven't exchanged secrets with yet.
     if (!sharedSecret) return null;
 
+    // 3. Start initialization
+    console.log(`🔐 Initializing new CryptoSession for ${peerKey}`);
     const initPromise = (async () => {
       try {
         const session = await CryptoSession.create(sharedSecret, usernameRef.current, peerKey);
@@ -89,39 +83,25 @@ export function useWebSocket() {
   };
 
   const connect = useCallback(() => {
-    if (socketRef.current?.readyState === WebSocket.OPEN || socketRef.current?.readyState === WebSocket.CONNECTING) {
-      return;
-    }
-
-    shouldReconnectRef.current = true;
-    clearReconnectTimer();
+    if (socketRef.current?.readyState === WebSocket.OPEN || socketRef.current?.readyState === WebSocket.CONNECTING) return;
 
     const protocol = window.location.hostname === "localhost" ? "ws" : "wss";
     const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
     socketRef.current = socket;
 
     setStatus("connecting");
+    setError("");
 
     socket.onopen = () => {
       setStatus("connected");
-      setError("");
-      reconnectAttemptsRef.current = 0;
-      setReconnectAttempt(0);
     };
 
     socket.onmessage = async (e) => {
-      let data: WSMessage;
-      try {
-        data = JSON.parse(e.data);
-      } catch (err) {
-        console.error("Invalid WS payload:", err);
-        return;
-      }
+      const data: WSMessage = JSON.parse(e.data);
 
       if (data.type === "error") {
         setError(data.error || "Connection error");
         socket.close();
-        return;
       }
 
       if (data.type === "connected" && data.username) {
@@ -136,7 +116,11 @@ export function useWebSocket() {
       }
 
       if (data.type === "message" && data.from && data.message) {
-        if (data.id && processedMessageIds.current.has(data.id)) return;
+        // De-duplicate message processing
+        if (data.id && processedMessageIds.current.has(data.id)) {
+          console.debug(`⏩ Skipping duplicate real-time message ${data.id}`);
+          return;
+        }
         if (data.id) processedMessageIds.current.add(data.id);
 
         let displayMessage = data.message;
@@ -145,12 +129,15 @@ export function useWebSocket() {
           const session = await getOrCreateSession(data.from);
           if (session) {
             try {
-              displayMessage = await session.decrypt(data.message.slice(4));
-            } catch {
-              displayMessage = "[Decryption Failed]";
+              // Strip prefix "QE1:"
+              const payload = data.message.slice(4);
+              displayMessage = await session.decrypt(payload);
+            } catch (err) {
+              console.error("Failed to decrypt incoming message:", err);
+              displayMessage = "🔒 [Decryption Failed]";
             }
           } else {
-            displayMessage = "[Encrypted - Open chat to decrypt]";
+            displayMessage = "🔒 [Encrypted - Open chat to decrypt]";
           }
         }
 
@@ -158,8 +145,8 @@ export function useWebSocket() {
           id: data.id,
           from: data.from,
           message: displayMessage,
-          timestamp: new Date(data.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          encrypted: !!data.encrypted || isEncryptedMessage(data.message),
+          timestamp: new Date(data.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          encrypted: !!data.encrypted || isEncryptedMessage(data.message)
         });
       }
 
@@ -167,25 +154,23 @@ export function useWebSocket() {
         setUnreadCounts(data.counts || {});
       }
 
-      if (data.type === "seen" && data.from) {
-        setSeenEvent({ from: data.from, at: Date.now() });
-      }
-
       if (data.type === "history" && data.with && data.messages) {
         const peerKey = data.with.toLowerCase();
-        let processedMessages: ChatMessage[] = data.messages.map((m) => {
+        let processedMessages: ChatMessage[] = data.messages.map(m => {
           if (m.id) processedMessageIds.current.add(m.id);
           return {
             id: m.id,
             from: m.from_user || m.from,
             message: m.message,
             is_seen: !!m.is_seen,
-            timestamp: new Date(m.created_at || m.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            encrypted: !!m.encrypted,
+            timestamp: new Date(m.created_at || m.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            encrypted: !!m.encrypted
           };
         });
 
         if (data.shared_secret && usernameRef.current) {
+          console.log(`🔐 Resyncing CryptoSession for ${peerKey} as ${usernameRef.current}`);
+
           const resyncPromise = (async () => {
             try {
               const session = await CryptoSession.create(data.shared_secret!, usernameRef.current, peerKey);
@@ -197,7 +182,7 @@ export function useWebSocket() {
             }
           })();
 
-          pendingSessionsRef.current.set(peerKey, resyncPromise.then((r) => r.session));
+          pendingSessionsRef.current.set(peerKey, resyncPromise.then(r => r.session));
           const { decrypted } = await resyncPromise;
           processedMessages = decrypted;
         }
@@ -205,35 +190,20 @@ export function useWebSocket() {
         setHistory({
           with: data.with,
           shared_secret: data.shared_secret,
-          messages: processedMessages,
+          messages: processedMessages
         });
       }
     };
 
     socket.onclose = () => {
       setStatus("disconnected");
-      socketRef.current = null;
-
-      if (!shouldReconnectRef.current) return;
-      if (reconnectTimeoutRef.current !== null) return;
-
-      const attempt = reconnectAttemptsRef.current + 1;
-      reconnectAttemptsRef.current = attempt;
-      setReconnectAttempt(attempt);
-
-      const delay = Math.min(1000 * 2 ** (attempt - 1), 10000);
-      reconnectTimeoutRef.current = window.setTimeout(() => {
-        reconnectTimeoutRef.current = null;
-        connect();
-      }, delay);
     };
 
     socket.onerror = () => {
       setStatus("disconnected");
-      setError("WebSocket connection failed. Reconnecting...");
-      socket.close();
+      setError("WebSocket connection failed");
     };
-  }, []);
+  }, []); // Break the loop! (Dependencies moved to refs)
 
   const sendMessage = useCallback(async (to: string, message: string) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -253,7 +223,6 @@ export function useWebSocket() {
       socketRef.current.send(JSON.stringify({ type: "message", to, message: finalMessage }));
       return true;
     }
-
     return false;
   }, []);
 
@@ -270,16 +239,11 @@ export function useWebSocket() {
   }, []);
 
   const disconnect = useCallback(() => {
-    shouldReconnectRef.current = false;
-    clearReconnectTimer();
     socketRef.current?.close();
-    socketRef.current = null;
   }, []);
 
   useEffect(() => {
     return () => {
-      shouldReconnectRef.current = false;
-      clearReconnectTimer();
       socketRef.current?.close();
     };
   }, []);
@@ -294,8 +258,6 @@ export function useWebSocket() {
     incomingMessage,
     history,
     unreadCounts,
-    seenEvent,
-    reconnectAttempt,
     setUnreadCounts,
     connect,
     sendMessage,
