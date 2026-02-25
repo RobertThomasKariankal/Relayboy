@@ -49,6 +49,7 @@ export default function ChatPage() {
   const { theme, setTheme } = useTheme();
 
   const {
+<<<<<<< HEAD
     status,
     username,
     avatarUrl,
@@ -66,6 +67,11 @@ export default function ChatPage() {
     getHistory,
     sendSeen,
     disconnect,
+=======
+    status, username, avatarUrl, setAvatarUrl, users,
+    error, incomingMessage, history, seenBy, unreadCounts, setUnreadCounts,
+    connect, sendMessage, getHistory, sendSeen, disconnect
+>>>>>>> 9d884d1 (notification fixed)
   } = useWebSocket();
 
   const [currentChat, setCurrentChat] = useState<string | null>(null);
@@ -83,6 +89,8 @@ export default function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const currentChatRef = useRef<string | null>(null);
+  const lastIncomingKeyRef = useRef<string>("");
 
   const unreadByUser = useMemo(() => {
     const acc: Record<string, number> = {};
@@ -118,16 +126,30 @@ export default function ChatPage() {
     fetchRecentChats();
   }, [connect]);
 
+<<<<<<< HEAD
   useEffect(() => {
     if (incomingMessage) {
       const fromName = incomingMessage.from;
       const fromKey = normalizeName(fromName);
+=======
+  useEffect(() => {
+    currentChatRef.current = currentChat;
+  }, [currentChat]);
+
+  // Handle incoming messages (process each once)
+  useEffect(() => {
+    if (incomingMessage) {
+      const dedupeKey = String(incomingMessage.id ?? `${incomingMessage.from}|${incomingMessage.timestamp}|${incomingMessage.message}`);
+      if (lastIncomingKeyRef.current === dedupeKey) return;
+      lastIncomingKeyRef.current = dedupeKey;
+>>>>>>> 9d884d1 (notification fixed)
 
       setChatHistory((prev) => ({
         ...prev,
         [fromName]: [...(prev[fromName] || []), incomingMessage],
       }));
 
+<<<<<<< HEAD
       if (currentChat && normalizeName(currentChat) === fromKey) {
         sendSeen(fromName);
         setUnreadCounts((prev) => {
@@ -136,6 +158,11 @@ export default function ChatPage() {
           delete next[fromKey];
           return next;
         });
+=======
+      // If message is from current chat, mark as seen immediately
+      if (currentChatRef.current === incomingMessage.from) {
+        sendSeen(incomingMessage.from);
+>>>>>>> 9d884d1 (notification fixed)
       } else {
         setUnreadCounts((prev) => ({
           ...prev,
@@ -145,16 +172,45 @@ export default function ChatPage() {
 
       fetchRecentChats();
     }
-  }, [incomingMessage, currentChat, sendSeen, setUnreadCounts]);
+  }, [incomingMessage, sendSeen, setUnreadCounts]);
 
   useEffect(() => {
     if (history) {
       setChatHistory((prev) => ({
         ...prev,
-        [history.with]: history.messages,
+        [history.with]: history.messages.map((m) => {
+          const isMine = m.from === username;
+          return {
+            ...m,
+            delivery_status: isMine ? (m.is_seen ? "seen" : "delivered") : m.delivery_status
+          };
+        }),
       }));
     }
-  }, [history]);
+  }, [history, username]);
+
+  // Handle real-time seen receipts
+  useEffect(() => {
+    if (!seenBy || !username) return;
+    setChatHistory((prev) => {
+      const peerMessages = prev[seenBy.from] || [];
+      if (peerMessages.length === 0) return prev;
+
+      const nextPeerMessages = peerMessages.map((m) => {
+        if (m.from !== username) return m;
+        return {
+          ...m,
+          is_seen: true,
+          delivery_status: "seen" as const
+        };
+      });
+
+      return {
+        ...prev,
+        [seenBy.from]: nextPeerMessages
+      };
+    });
+  }, [seenBy, username]);
 
   useEffect(() => {
     if (seenEvent && username) {
@@ -270,7 +326,23 @@ export default function ChatPage() {
   const handleSendMessage = async (message: string) => {
     if (!currentChat || !username) return;
 
+    const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const optimisticMessage: ChatMessage = {
+      id: tempId,
+      from: username,
+      message,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      is_seen: false,
+      delivery_status: "sending",
+    };
+
+    setChatHistory((prev) => ({
+      ...prev,
+      [currentChat]: [...(prev[currentChat] || []), optimisticMessage],
+    }));
+
     const success = await sendMessage(currentChat, message);
+<<<<<<< HEAD
     if (success) {
       const newMessage: ChatMessage = {
         from: username,
@@ -283,6 +355,18 @@ export default function ChatPage() {
         [currentChat]: [...(prev[currentChat] || []), newMessage],
       }));
     }
+=======
+    setChatHistory((prev) => ({
+      ...prev,
+      [currentChat]: (prev[currentChat] || []).map((m) => {
+        if (m.id !== tempId) return m;
+        return {
+          ...m,
+          delivery_status: success ? "delivered" : "failed"
+        };
+      }),
+    }));
+>>>>>>> 9d884d1 (notification fixed)
   };
 
   const openChat = (user: string) => {
@@ -526,11 +610,16 @@ export default function ChatPage() {
                   ) : (
                     currentMessages.map((msg, index) => (
                       <ChatBubble
+<<<<<<< HEAD
                         key={msg.id ?? index}
+=======
+                        key={String(msg.id ?? `${msg.from}-${msg.timestamp}-${i}`)}
+>>>>>>> 9d884d1 (notification fixed)
                         message={msg.message}
                         timestamp={msg.timestamp}
                         isSent={msg.from === username}
                         isSeen={msg.is_seen}
+                        deliveryStatus={msg.delivery_status}
                         senderName={msg.from !== username ? msg.from : undefined}
                       />
                     ))

@@ -500,7 +500,14 @@ wss.on("connection", async (ws, req) => {
       console.log(`📩 Received WS message: ${data.type} from ${username}`);
 
       if (data.type === "message") {
-        const isEncrypted = data.message.startsWith("QE1:");
+        const isEncrypted = typeof data.message === "string" && data.message.startsWith("QE1:");
+        if (!isEncrypted) {
+          ws.send(JSON.stringify({
+            type: "message_rejected",
+            error: "Plaintext messages are blocked. Secure session required."
+          }));
+          return;
+        }
         const { data: insertedData, error: insertError } = await withRetry(() =>
           supabase
             .from("messages")
@@ -590,17 +597,34 @@ wss.on("connection", async (ws, req) => {
           const { data: existingHandshake, error: hsError } = await withRetry(() =>
             supabase
               .from("handshakes")
-              .select("shared_secret")
+              .select("sender, receiver, ciphertext")
               .or(`and(sender.eq."${myKey}",receiver.eq."${peerKey}"),and(sender.eq."${peerKey}",receiver.eq."${myKey}")`)
               .limit(1)
           );
 
           if (hsError) {
             console.error("❌ Handshake lookup error:", hsError);
-          } else if (existingHandshake && existingHandshake.length > 0 && existingHandshake[0].shared_secret) {
-            // Handshake already exists — reuse the shared secret
-            sharedSecretBase64 = existingHandshake[0].shared_secret;
-            console.log(`🔗 Existing handshake found between ${username} and ${data.to}`);
+          } else if (existingHandshake && existingHandshake.length > 0 && existingHandshake[0].ciphertext) {
+            const handshake = existingHandshake[0];
+            const receiverUsername = handshake.receiver;
+            const { data: receiverData, error: receiverError } = await withRetry(() =>
+              supabase
+                .from("users")
+                .select("kyber_private_key")
+                .eq("username", receiverUsername)
+                .limit(1)
+            );
+
+            if (receiverError || !receiverData || receiverData.length === 0 || !receiverData[0].kyber_private_key) {
+              console.warn(`⚠️ Existing handshake cannot be derived for ${username} ↔ ${data.to}`);
+            } else {
+              const ciphertext = base64ToUint8Array(handshake.ciphertext);
+              const receiverPrivKey = base64ToUint8Array(receiverData[0].kyber_private_key);
+              const decapsulator = new KyberDecapsulator();
+              const sharedSecret = await decapsulator.decapsulate(ciphertext, receiverPrivKey);
+              sharedSecretBase64 = uint8ArrayToBase64(sharedSecret);
+              console.log(`🔗 Existing handshake found between ${username} and ${data.to}`);
+            }
           } else {
             // No handshake — perform Kyber encapsulation/decapsulation
             console.log(`🤝 No handshake found. Initiating Kyber key exchange for ${username} ↔ ${data.to}`);
@@ -644,8 +668,7 @@ wss.on("connection", async (ws, req) => {
                   supabase.from("handshakes").insert([{
                     sender: username,
                     receiver: data.to,
-                    ciphertext: ciphertextB64,
-                    shared_secret: sharedSecretBase64
+                    ciphertext: ciphertextB64
                   }])
                 );
 

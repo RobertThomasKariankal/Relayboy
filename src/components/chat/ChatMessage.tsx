@@ -8,9 +8,12 @@ interface ChatMessageProps {
   isSent: boolean;
   senderName?: string;
   isSeen?: boolean;
+  deliveryStatus?: "sending" | "delivered" | "seen" | "failed";
 }
 
-export function ChatMessage({ message, timestamp, isSent, senderName, isSeen }: ChatMessageProps) {
+export function ChatMessage({ message, timestamp, isSent, senderName, isSeen, deliveryStatus }: ChatMessageProps) {
+  const status = deliveryStatus || (isSeen ? "seen" : "delivered");
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -34,10 +37,36 @@ export function ChatMessage({ message, timestamp, isSent, senderName, isSeen }: 
         >
           {message}
         </div>
+<<<<<<< HEAD
 
         <div className="mt-1 px-1.5 text-[10px] text-muted-foreground font-semibold flex items-center gap-1.5">
           <span>{timestamp}</span>
           {isSent ? <span>{isSeen ? "Seen" : "Sent"}</span> : null}
+=======
+        <div className="flex items-center gap-1.5 mt-1.5 px-2">
+          <span className="text-[10px] text-muted-foreground/60 font-semibold">
+            {timestamp}
+          </span>
+          {isSent && (
+            <div className={cn(
+              "flex items-center text-[10px]",
+              status === "seen" ? "text-primary" : status === "failed" ? "text-destructive" : "text-muted-foreground/60"
+            )}>
+              {status === "seen" ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L7 17l-5-5"></path><path d="M22 10l-7.5 7.5L13 16"></path></svg>
+              ) : status === "sending" ? (
+                <span className="font-semibold">Sending</span>
+              ) : status === "failed" ? (
+                <span className="font-semibold">Failed</span>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>
+                  <span className="ml-1 font-semibold">Delivered</span>
+                </>
+              )}
+            </div>
+          )}
+>>>>>>> 9d884d1 (notification fixed)
         </div>
       </div>
     </motion.div>

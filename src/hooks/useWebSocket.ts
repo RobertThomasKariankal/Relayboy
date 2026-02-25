@@ -10,6 +10,7 @@ export interface ChatMessage {
   timestamp: string;
   is_seen?: boolean;
   encrypted?: boolean;
+  delivery_status?: "sending" | "delivered" | "seen" | "failed";
 }
 
 interface WSMessage {
@@ -44,8 +45,12 @@ export function useWebSocket() {
   const [incomingMessage, setIncomingMessage] = useState<ChatMessage | null>(null);
   const [history, setHistory] = useState<{ with: string; messages: ChatMessage[]; shared_secret?: string } | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<{ [user: string]: number }>({});
+<<<<<<< HEAD
   const [seenEvent, setSeenEvent] = useState<{ from: string; at: number } | null>(null);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
+=======
+  const [seenBy, setSeenBy] = useState<{ from: string; at: number } | null>(null);
+>>>>>>> 9d884d1 (notification fixed)
 
   const socketRef = useRef<WebSocket | null>(null);
   const sessionsRef = useRef<Map<string, CryptoSession>>(new Map());
@@ -124,6 +129,10 @@ export function useWebSocket() {
         return;
       }
 
+      if (data.type === "message_rejected") {
+        setError(data.error || "Message rejected by secure transport policy");
+      }
+
       if (data.type === "connected" && data.username) {
         setUsername(data.username);
         usernameRef.current = data.username;
@@ -168,7 +177,11 @@ export function useWebSocket() {
       }
 
       if (data.type === "seen" && data.from) {
+<<<<<<< HEAD
         setSeenEvent({ from: data.from, at: Date.now() });
+=======
+        setSeenBy({ from: data.from, at: Date.now() });
+>>>>>>> 9d884d1 (notification fixed)
       }
 
       if (data.type === "history" && data.with && data.messages) {
@@ -237,20 +250,22 @@ export function useWebSocket() {
 
   const sendMessage = useCallback(async (to: string, message: string) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      let finalMessage = message;
-
       const session = await getOrCreateSession(to);
-      if (session) {
-        try {
-          const encrypted = await session.encrypt(message);
-          finalMessage = wrapEncrypted(encrypted);
-        } catch (err) {
-          console.error("Encryption failed:", err);
-          return false;
-        }
+      if (!session) {
+        setError("Secure session not ready. Open the chat and wait for key exchange.");
+        socketRef.current.send(JSON.stringify({ type: "get_history", to }));
+        return false;
       }
 
-      socketRef.current.send(JSON.stringify({ type: "message", to, message: finalMessage }));
+      try {
+        const encrypted = await session.encrypt(message);
+        const finalMessage = wrapEncrypted(encrypted);
+        socketRef.current.send(JSON.stringify({ type: "message", to, message: finalMessage }));
+      } catch (err) {
+        console.error("Encryption failed:", err);
+        setError("Encryption failed. Message not sent.");
+        return false;
+      }
       return true;
     }
 
@@ -293,6 +308,7 @@ export function useWebSocket() {
     error,
     incomingMessage,
     history,
+    seenBy,
     unreadCounts,
     seenEvent,
     reconnectAttempt,
