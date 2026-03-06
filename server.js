@@ -12,6 +12,7 @@ import { fileURLToPath } from "url";
 
 import { supabase } from "./db.js";
 import redis from "./redisClient.js";
+import { RedisStore } from "connect-redis";
 import { KyberKeyGenerator, uint8ArrayToBase64 } from "./kyber/kyber-keygen.js";
 import { KyberEncapsulator } from "./kyber/kyber-encapsulate.js";
 import { KyberDecapsulator } from "./kyber/kyber-decapsulate.js";
@@ -43,10 +44,26 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1 day
+const SESSION_MAX_AGE_SEC = 24 * 60 * 60; // 1 day in seconds
+const USER_SESSION_PREFIX = "user_session:";
+
 const sessionParser = session({
+  store: new RedisStore({
+    client: redis,
+    prefix: "relayboy_sess:",
+    ttl: SESSION_MAX_AGE_SEC,
+  }),
   saveUninitialized: false,
   secret: process.env.SESSION_SECRET || "relayboy_secret_fallback",
-  resave: false
+  resave: false,
+  name: "connect.sid",
+  cookie: {
+    maxAge: SESSION_MAX_AGE_MS,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  },
 });
 app.use(sessionParser);
 
@@ -71,6 +88,21 @@ function generateOTP() {
 
 function normalizeUsername(value) {
   return String(value || "").toLowerCase();
+}
+
+async function getUserActiveSession(username) {
+  const key = USER_SESSION_PREFIX + normalizeUsername(username);
+  return await redis.get(key);
+}
+
+async function setUserActiveSession(username, sessionId) {
+  const key = USER_SESSION_PREFIX + normalizeUsername(username);
+  await redis.setEx(key, SESSION_MAX_AGE_SEC, sessionId);
+}
+
+async function clearUserActiveSession(username) {
+  const key = USER_SESSION_PREFIX + normalizeUsername(username);
+  await redis.del(key);
 }
 
 function isPasswordStrong(password) {
@@ -110,6 +142,14 @@ app.get("/api/config", (req, res) => {
     url: process.env.SUPABASE_URL,
     key: process.env.SUPABASE_ANON_KEY
   });
+});
+
+// ---------------- SESSION CHECK (for redirect-if-authenticated) ----------------
+app.get("/api/session/check", (req, res) => {
+  if (req.session.authenticated && req.session.username) {
+    return res.json({ authenticated: true, username: req.session.username, avatar_url: req.session.avatar_url || null });
+  }
+  res.json({ authenticated: false });
 });
 
 app.post("/register", async (req, res) => {
@@ -235,6 +275,7 @@ app.post("/verify-register-otp", async (req, res) => {
 
     req.session.authenticated = true;
     req.session.username = pending.username;
+    await setUserActiveSession(pending.username, req.sessionID);
 
     console.log("[Verify OTP] Success");
     res.json({ ok: true, username: pending.username });
@@ -313,14 +354,27 @@ app.post("/login", async (req, res) => {
   if (!user || !bcrypt.compareSync(password, user.password_hash))
     return res.status(400).json({ error: "Invalid credentials" });
 
+  // Single-device: reject if user already has an active session elsewhere
+  const existingSessionId = await getUserActiveSession(user.username);
+  if (existingSessionId) {
+    const sessionExists = await redis.get("relayboy_sess:" + existingSessionId);
+    if (sessionExists) {
+      return res.status(403).json({ error: "Already logged in" });
+    }
+    await clearUserActiveSession(user.username);
+  }
+
   req.session.authenticated = true;
   req.session.username = user.username;
   req.session.avatar_url = user.avatar_url;
+
+  await setUserActiveSession(user.username, req.sessionID);
 
   res.json({
     ok: true,
     avatar_url: user.avatar_url,
     username: user.username,
+    kyber_public_key: user.kyber_public_key || null,
     encrypted_private_key: user.encrypted_private_key || null,
     backup_salt: user.backup_salt || null,
     backup_iv: user.backup_iv || null,
@@ -359,6 +413,7 @@ app.post("/logout", async (req, res) => {
   const username = req.session.username;
   try {
     if (username) {
+      await clearUserActiveSession(username);
       console.log(`[Logout] Marking ${username} as OFFLINE`);
       await withRetry(() =>
         supabase

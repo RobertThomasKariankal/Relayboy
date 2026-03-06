@@ -49,6 +49,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "connect-redis": "^9.0.0",
     "cookie-parser": "^1.4.7",
     "crystals-kyber-js": "^2.5.0",
     "date-fns": "^3.6.0",

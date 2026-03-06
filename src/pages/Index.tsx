@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { MessageCircle, Users, Zap, Shield, ArrowRight, LockKeyhole } from "lucide-react";
 import PageTransition from "@/components/PageTransition";
@@ -24,6 +25,35 @@ const features = [
 ];
 
 export default function Index() {
+  const navigate = useNavigate();
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/session/check", { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data.authenticated) {
+          navigate("/chat", { replace: true });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <PageTransition>
       <AnimatedBackground />

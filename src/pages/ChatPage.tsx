@@ -102,6 +102,23 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
+    let cancelled = false;
+    fetch("/api/session/check", { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && !data.authenticated) {
+          navigate("/login", { replace: true });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) navigate("/login", { replace: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
+  useEffect(() => {
     connect();
     fetchRecentChats();
   }, [connect]);

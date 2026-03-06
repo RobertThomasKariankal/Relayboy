@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useSessionCheck } from "@/hooks/useSessionCheck";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +22,7 @@ interface PendingBackup {
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { checking } = useSessionCheck();
   const [mode, setMode] = useState<AuthMode>("login");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -52,10 +54,15 @@ export default function LoginPage() {
         masterPassword
       );
 
+      const publicKey = pendingBackup.publicKey;
+      if (!publicKey) {
+        setError("Key restore failed: missing public key. Please try logging in again.");
+        return;
+      }
       await secureDB.saveUserKeys({
         username: pendingBackup.username.toLowerCase(),
         privateKey: privateKeyB64,
-        publicKey: pendingBackup.publicKey || "",
+        publicKey,
         createdAt: Date.now(),
       });
 
@@ -78,6 +85,7 @@ export default function LoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ emailOrUsername: loginIdentifier, password: loginPassword }),
+        credentials: "include",
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
@@ -98,7 +106,7 @@ export default function LoginPage() {
           encryptedBlob: data.encrypted_private_key,
           salt: data.backup_salt,
           iv: data.backup_iv,
-          publicKey: null, // We'll fetch it if needed
+          publicKey: data.kyber_public_key || null,
         });
         setMode("restore");
       } else {
@@ -106,7 +114,8 @@ export default function LoginPage() {
         navigate("/chat");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      const msg = err instanceof Error ? err.message : "Login failed";
+      setError(msg === "Already logged in" ? "Already logged in. Sign out on your other device first." : msg);
     } finally {
       setLoading(false);
     }
@@ -133,6 +142,16 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (checking) {
+    return (
+      <AuthShell title="RelayBoy" subtitle="Loading..." icon={<MessageCircle className="w-8 h-8 text-primary-foreground" />}>
+        <div className="glass-card quantum-card rounded-[2rem] p-8 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        </div>
+      </AuthShell>
+    );
+  }
 
   // Restore keys screen (early return)
   if (mode === "restore") return (

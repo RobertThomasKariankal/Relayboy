@@ -18,8 +18,20 @@ function uint8ToBase64(bytes: Uint8Array): string {
     return btoa(binary);
 }
 
+/**
+ * Normalize base64 string: strip whitespace, handle URL-safe variant.
+ */
+function normalizeBase64(s: string): string {
+    return s
+        .replace(/\s/g, "")
+        .replace(/-/g, "+")
+        .replace(/_/g, "/");
+}
+
 function base64ToUint8(base64: string): Uint8Array {
-    const binary = atob(base64);
+    const normalized = normalizeBase64(base64);
+    const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(normalized + padding);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
@@ -101,12 +113,19 @@ export async function decryptPrivateKey(
     iv: string,
     masterPassword: string
 ): Promise<string> {
-    const wrappingKey = await deriveWrappingKey(masterPassword, base64ToUint8(salt));
+    if (!encryptedBlob || !salt || !iv) {
+        throw new Error("Invalid backup data: missing encrypted blob, salt, or IV");
+    }
+    const saltBytes = base64ToUint8(salt);
+    const ivBytes = base64ToUint8(iv);
+    const blobBytes = base64ToUint8(encryptedBlob);
+
+    const wrappingKey = await deriveWrappingKey(masterPassword, saltBytes);
 
     const decrypted = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: base64ToUint8(iv) as BufferSource },
+        { name: "AES-GCM", iv: ivBytes as BufferSource },
         wrappingKey,
-        base64ToUint8(encryptedBlob) as BufferSource
+        blobBytes as BufferSource
     );
 
     const decoder = new TextDecoder();
