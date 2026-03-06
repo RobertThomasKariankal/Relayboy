@@ -70,8 +70,22 @@ export class SecureDB {
   // --- User Keys Store ---
 
   async saveUserKeys(record: UserKeyRecord): Promise<void> {
-    await this.init();
-    return this.performTransaction("user_keys", "readwrite", (store) => store.put(record));
+    const maxRetries = 2;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await this.init();
+        await this.performTransaction("user_keys", "readwrite", (store) => store.put(record));
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if ((msg.includes("connection is closing") || msg.includes("connection closed")) && attempt < maxRetries) {
+          this.db = null;
+          await new Promise((r) => setTimeout(r, 100));
+        } else {
+          throw err;
+        }
+      }
+    }
   }
 
   async getUserKeys(username: string): Promise<UserKeyRecord | null> {
@@ -146,7 +160,8 @@ export class SecureDB {
       const store = transaction.objectStore(storeName);
       const request = operation(store);
 
-      request.onsuccess = () => resolve(request.result);
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onerror = () => reject(transaction.error);
       request.onerror = () => reject(request.error);
     });
   }

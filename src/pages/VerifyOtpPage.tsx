@@ -120,7 +120,7 @@ export default function VerifyOtpPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Verification failed");
 
-      // 3. Save PRIVATE KEY to IndexedDB
+      // 3. Save PRIVATE KEY to IndexedDB (must complete before we persist user to DB)
       console.log("💾 Saving private key to local secure storage...");
       await secureDB.saveUserKeys({
         username: data.username.toLowerCase(),
@@ -129,7 +129,17 @@ export default function VerifyOtpPage() {
         createdAt: Date.now(),
       });
 
+      // 4. Only persist user to DB after keys are saved and user has successfully entered
+      const completeRes = await fetch("/api/registration/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      const completeData = await completeRes.json();
+      if (!completeRes.ok) throw new Error(completeData.error || "Failed to complete registration");
+
       sessionStorage.removeItem("register_email");
+      await new Promise((r) => setTimeout(r, 50));
       navigate("/chat");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");

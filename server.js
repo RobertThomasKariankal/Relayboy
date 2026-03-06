@@ -228,6 +228,9 @@ app.post("/register", async (req, res) => {
   }
 });
 
+const PENDING_REGISTRATION_PREFIX = "pending_registration:";
+const PENDING_REGISTRATION_TTL = 600; // 10 minutes to complete
+
 // ---------------- VERIFY OTP ----------------
 app.post("/verify-register-otp", async (req, res) => {
   const { email, otp } = req.body;
@@ -247,41 +250,79 @@ app.post("/verify-register-otp", async (req, res) => {
       return res.status(400).json({ error: "Invalid OTP" });
     }
 
-    const { kyber_public_key } = req.body;
     if (!kyber_public_key) {
       return res.status(400).json({ error: "Missing Kyber public key" });
     }
 
-    const { error: insertError } = await withRetry(() =>
-      supabase.from("users").insert([{
-        email: pending.email,
-        username: pending.username,
-        password_hash: pending.password_hash,
-        is_verified: true,
-        kyber_public_key: kyber_public_key,
-        encrypted_private_key: encrypted_private_key || null,
-        backup_salt: backup_salt || null,
-        backup_iv: backup_iv || null,
-        // kyber_private_key is NOT stored here anymore (E2EE)
-      }])
-    );
-
-    if (insertError) {
-      console.error("[Verify OTP] Supabase insert error:", insertError);
-      throw insertError;
-    }
+    const userData = {
+      email: pending.email,
+      username: pending.username,
+      password_hash: pending.password_hash,
+      is_verified: true,
+      kyber_public_key,
+      encrypted_private_key: encrypted_private_key || null,
+      backup_salt: backup_salt || null,
+      backup_iv: backup_iv || null,
+    };
 
     await redis.del(`register:${email}`);
 
+    await redis.setEx(
+      PENDING_REGISTRATION_PREFIX + pending.username,
+      PENDING_REGISTRATION_TTL,
+      JSON.stringify(userData)
+    );
+
     req.session.authenticated = true;
     req.session.username = pending.username;
-    await setUserActiveSession(pending.username, req.sessionID);
+    req.session.pendingRegistration = true;
 
-    console.log("[Verify OTP] Success");
+    console.log("[Verify OTP] Pending registration stored, awaiting completion");
     res.json({ ok: true, username: pending.username });
   } catch (err) {
     console.error("[Verify OTP] Critical Error:", err);
     res.status(500).json({ error: "Verification failed. Please try again later.", details: err.message });
+  }
+});
+
+// ---------------- COMPLETE REGISTRATION (called after client saves keys and enters app) ----------------
+app.post("/api/registration/complete", async (req, res) => {
+  if (!req.session.authenticated || !req.session.username) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  if (!req.session.pendingRegistration) {
+    return res.json({ ok: true });
+  }
+
+  const username = req.session.username;
+  const key = PENDING_REGISTRATION_PREFIX + username;
+
+  try {
+    const cached = await redis.get(key);
+    if (!cached) {
+      return res.status(400).json({ error: "Registration expired. Please register again." });
+    }
+
+    const userData = JSON.parse(cached);
+
+    const { error: insertError } = await withRetry(() =>
+      supabase.from("users").insert([userData])
+    );
+
+    if (insertError) {
+      console.error("[Registration Complete] Supabase insert error:", insertError);
+      throw insertError;
+    }
+
+    await redis.del(key);
+    delete req.session.pendingRegistration;
+    await setUserActiveSession(username, req.sessionID);
+
+    console.log(`[Registration Complete] User ${username} created in database`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[Registration Complete] Error:", err);
+    res.status(500).json({ error: "Failed to complete registration. Please try again." });
   }
 });
 
