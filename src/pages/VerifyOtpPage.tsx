@@ -130,11 +130,12 @@ export default function VerifyOtpPage() {
         createdAt: Date.now(),
       });
 
-      // 4. Only persist user to DB after keys are saved and user has successfully entered
+      // 4. Only persist user to DB after keys are saved (token-based, no session cookie needed)
       const completeRes = await fetch("/api/registration/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        body: JSON.stringify({ completionToken: data.completionToken }),
       });
       const completeData = await completeRes.json();
       if (!completeRes.ok) throw new Error(completeData.error || "Failed to complete registration");

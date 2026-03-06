@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import dns from "dns";
 import express from "express";
 import http from "http";
@@ -231,6 +232,10 @@ app.post("/register", async (req, res) => {
 const PENDING_REGISTRATION_PREFIX = "pending_registration:";
 const PENDING_REGISTRATION_TTL = 600; // 10 minutes to complete
 
+function generateCompletionToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
 // ---------------- VERIFY OTP ----------------
 app.post("/verify-register-otp", async (req, res) => {
   const { email, otp } = req.body;
@@ -267,40 +272,34 @@ app.post("/verify-register-otp", async (req, res) => {
 
     await redis.del(`register:${email}`);
 
+    const completionToken = generateCompletionToken();
     await redis.setEx(
-      PENDING_REGISTRATION_PREFIX + pending.username,
+      PENDING_REGISTRATION_PREFIX + completionToken,
       PENDING_REGISTRATION_TTL,
       JSON.stringify(userData)
     );
 
-    req.session.authenticated = true;
-    req.session.username = pending.username;
-    req.session.pendingRegistration = true;
-
     console.log("[Verify OTP] Pending registration stored, awaiting completion");
-    res.json({ ok: true, username: pending.username });
+    res.json({ ok: true, username: pending.username, completionToken });
   } catch (err) {
     console.error("[Verify OTP] Critical Error:", err);
     res.status(500).json({ error: "Verification failed. Please try again later.", details: err.message });
   }
 });
 
-// ---------------- COMPLETE REGISTRATION (called after client saves keys and enters app) ----------------
+// ---------------- COMPLETE REGISTRATION (token-based, no session required) ----------------
 app.post("/api/registration/complete", async (req, res) => {
-  if (!req.session.authenticated || !req.session.username) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  if (!req.session.pendingRegistration) {
-    return res.json({ ok: true });
+  const { completionToken } = req.body;
+  if (!completionToken || typeof completionToken !== "string") {
+    return res.status(400).json({ error: "Missing completion token" });
   }
 
-  const username = req.session.username;
-  const key = PENDING_REGISTRATION_PREFIX + username;
+  const key = PENDING_REGISTRATION_PREFIX + completionToken;
 
   try {
     const cached = await redis.get(key);
     if (!cached) {
-      return res.status(400).json({ error: "Registration expired. Please register again." });
+      return res.status(400).json({ error: "Registration expired or invalid token. Please register again." });
     }
 
     const userData = JSON.parse(cached);
@@ -315,10 +314,13 @@ app.post("/api/registration/complete", async (req, res) => {
     }
 
     await redis.del(key);
-    delete req.session.pendingRegistration;
-    await setUserActiveSession(username, req.sessionID);
 
-    console.log(`[Registration Complete] User ${username} created in database`);
+    req.session.authenticated = true;
+    req.session.username = userData.username;
+    req.session.avatar_url = userData.avatar_url || null;
+    await setUserActiveSession(userData.username, req.sessionID);
+
+    console.log(`[Registration Complete] User ${userData.username} created in database`);
     res.json({ ok: true });
   } catch (err) {
     console.error("[Registration Complete] Error:", err);
