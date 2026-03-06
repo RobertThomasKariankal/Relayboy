@@ -27,7 +27,7 @@ export function ChatInput({ onSend, disabled = false, placeholder = "Type your m
   };
 
   return (
-    <div className="max-w-4xl mx-auto flex items-center gap-2 p-2 rounded-2xl border border-border/80 bg-card/75 backdrop-blur-md">
+    <div className="max-w-4xl mx-auto flex items-center gap-2 p-2 rounded-2xl border border-border/80 glass-card">
       <Input
         value={message}
         onChange={(e) => setMessage(e.target.value)}
@@ -41,7 +41,7 @@ export function ChatInput({ onSend, disabled = false, placeholder = "Type your m
         onClick={handleSend}
         disabled={disabled || !message.trim()}
         size="icon"
-        className="w-10 h-10 rounded-xl gradient-primary text-primary-foreground"
+        className="w-10 h-10 rounded-xl gradient-primary text-primary-foreground shadow-sm"
       >
         <Send className="h-4.5 w-4.5" />
       </Button>

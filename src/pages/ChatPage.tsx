@@ -13,7 +13,6 @@ import {
   Users,
   LogOut,
   Search,
-  MoreVertical,
   Moon,
   Sun,
   Monitor,
@@ -21,11 +20,13 @@ import {
   Upload,
   Shield,
   PanelLeft,
+  Settings,
+  MessageSquare,
 } from "lucide-react";
 import PageTransition from "@/components/PageTransition";
 import AnimatedBackground from "@/components/AnimatedBackground";
 import { motion, AnimatePresence } from "framer-motion";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "next-themes";
@@ -36,6 +37,15 @@ interface ChatHistory {
   [user: string]: ChatMessage[];
 }
 
+interface RecentChat {
+  username: string;
+  last_message: string;
+  last_message_at?: string;
+  last_message_from?: string;
+  avatar_url: string | null;
+  is_online?: boolean;
+}
+
 const normalizeName = (name: string) => name.toLowerCase();
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -43,15 +53,53 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function formatRecentTime(timestamp?: string) {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const sameDay = now.toDateString() === date.toDateString();
+  if (sameDay) {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function formatRecentPreview(entry: RecentChat | undefined, myUsername?: string) {
+  if (!entry) return "";
+  const raw = entry.last_message || "";
+  const sender = entry.last_message_from || entry.username;
+  const senderLabel = normalizeName(sender) === normalizeName(myUsername || "") ? "You" : sender;
+  if (!raw.trim()) return `${senderLabel}: No message`;
+  if (raw.startsWith("QE1:")) return `${senderLabel}: Encrypted message`;
+  return `${senderLabel}: ${raw}`;
+}
+
+type SidebarTab = "recent" | "online" | "settings";
+
 export default function ChatPage() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { theme, setTheme } = useTheme();
 
   const {
-    status, username, avatarUrl, setAvatarUrl, users,
-    error, incomingMessage, history, seenBy, unreadCounts, reconnectAttempt, setUnreadCounts,
-    connect, sendMessage, getHistory, sendSeen, disconnect,
+    status,
+    username,
+    avatarUrl,
+    setAvatarUrl,
+    users,
+    error,
+    incomingMessage,
+    history,
+    seenBy,
+    unreadCounts,
+    reconnectAttempt,
+    setUnreadCounts,
+    connect,
+    sendMessage,
+    getHistory,
+    sendSeen,
+    disconnect,
   } = useWebSocket();
 
   const [currentChat, setCurrentChat] = useState<string | null>(null);
@@ -59,10 +107,8 @@ export default function ChatPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isUsersSheetOpen, setIsUsersSheetOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<"recent" | "online">("recent");
-  const [recentChats, setRecentChats] = useState<
-    { username: string; last_message: string; avatar_url: string | null; is_online?: boolean }[]
-  >([]);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("recent");
+  const [recentChats, setRecentChats] = useState<RecentChat[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ username: string; avatar_url?: string }[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -150,14 +196,13 @@ export default function ChatPage() {
           const isMine = m.from === username;
           return {
             ...m,
-            delivery_status: isMine ? (m.is_seen ? "seen" : "delivered") : m.delivery_status
+            delivery_status: isMine ? (m.is_seen ? "seen" : "delivered") : m.delivery_status,
           };
         }),
       }));
     }
   }, [history, username]);
 
-  // Handle real-time seen receipts
   useEffect(() => {
     if (!seenBy || !username) return;
     setChatHistory((prev) => {
@@ -169,13 +214,13 @@ export default function ChatPage() {
         return {
           ...m,
           is_seen: true,
-          delivery_status: "seen" as const
+          delivery_status: "seen" as const,
         };
       });
 
       return {
         ...prev,
-        [seenBy.from]: nextPeerMessages
+        [seenBy.from]: nextPeerMessages,
       };
     });
   }, [seenBy, username]);
@@ -283,7 +328,7 @@ export default function ChatPage() {
       id: tempId,
       from: username,
       message,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       is_seen: false,
       delivery_status: "sending",
     };
@@ -300,7 +345,7 @@ export default function ChatPage() {
         if (m.id !== tempId) return m;
         return {
           ...m,
-          delivery_status: success ? "delivered" : "failed"
+          delivery_status: success ? "delivered" : "failed",
         };
       }),
     }));
@@ -339,6 +384,8 @@ export default function ChatPage() {
         list.unshift({
           username: onlineUser.username,
           last_message: "",
+          last_message_at: "",
+          last_message_from: onlineUser.username,
           avatar_url: onlineUser.avatar_url || null,
           is_online: onlineUser.is_online,
         });
@@ -356,166 +403,182 @@ export default function ChatPage() {
 
   const currentChatUser = currentChat ? userMap.get(normalizeName(currentChat)) : undefined;
 
-  const UsersPanel = (
-    <>
-      <div className="p-4 border-b border-border/70">
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search users"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-10 pr-3 rounded-xl glass-input text-sm focus:outline-none focus:ring-2 focus:ring-ring/25"
-          />
-        </div>
+  const railButtons: { id: SidebarTab; label: string; icon: typeof MessageSquare }[] = [
+    { id: "recent", label: "Recent chats", icon: MessageSquare },
+    { id: "online", label: "Online users", icon: Users },
+    { id: "settings", label: "Settings", icon: Settings },
+  ];
 
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={() => setSidebarTab("recent")}
-            className={cn(
-              "h-9 rounded-xl text-xs font-bold uppercase tracking-wider border",
-              sidebarTab === "recent"
-                ? "bg-primary/12 text-primary border-primary/40"
-                : "bg-card/50 text-muted-foreground border-border/70"
-            )}
-          >
-            Recent
-          </button>
-          <button
-            onClick={() => setSidebarTab("online")}
-            className={cn(
-              "h-9 rounded-xl text-xs font-bold uppercase tracking-wider border",
-              sidebarTab === "online"
-                ? "bg-primary/12 text-primary border-primary/40"
-                : "bg-card/50 text-muted-foreground border-border/70"
-            )}
-          >
-            Online
-          </button>
-        </div>
-      </div>
+  const SidebarPanel = (
+    <div className="h-full flex flex-col">
+      {sidebarTab !== "settings" ? (
+        <>
+          <div className="p-4 border-b border-border/70">
+            <div className="mb-3">
+              <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground font-semibold">
+                {sidebarTab === "online" ? "Users available" : "Recent activity"}
+              </p>
+              <h2 className="text-lg font-semibold mt-1">{sidebarTab === "online" ? "Online users" : "Recent chats"}</h2>
+            </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin">
-        {isSearching ? (
-          <div className="h-32 flex items-center justify-center">
-            <div className="w-6 h-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            <div className="clay-card rounded-2xl p-3 border border-border/70">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">Search</p>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder={sidebarTab === "online" ? "Search online users" : "Search chats"}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full h-10 pl-10 pr-3 rounded-xl glass-input text-sm focus:outline-none focus:ring-2 focus:ring-ring/25"
+                />
+              </div>
+            </div>
           </div>
-        ) : activeList.length === 0 ? (
-          <div className="h-36 flex items-center justify-center text-sm text-muted-foreground">No users found</div>
-        ) : (
-          activeList.map((user) => (
-            <UserListItem
-              key={user.username}
-              username={user.username}
-              avatarUrl={user.avatar_url}
-              isOnline={!!userMap.get(normalizeName(user.username))?.is_online}
-              isActive={currentChat ? normalizeName(currentChat) === normalizeName(user.username) : false}
-              unreadCount={getUnreadFor(user.username)}
-              onClick={() => openChat(user.username)}
-            />
-          ))
-        )}
-      </div>
-    </>
+
+          <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin">
+            {isSearching ? (
+              <div className="h-32 flex items-center justify-center">
+                <div className="w-6 h-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              </div>
+            ) : activeList.length === 0 ? (
+              <div className="h-36 flex items-center justify-center text-sm text-muted-foreground">No users found</div>
+            ) : (
+              activeList.map((user) => {
+                const normalized = normalizeName(user.username);
+                const recentEntry = recentListWithUnread.find((entry) => normalizeName(entry.username) === normalized);
+                return (
+                  <UserListItem
+                    key={user.username}
+                    username={user.username}
+                    avatarUrl={user.avatar_url}
+                    isOnline={!!userMap.get(normalized)?.is_online}
+                    isActive={currentChat ? normalizeName(currentChat) === normalized : false}
+                    unreadCount={getUnreadFor(user.username)}
+                    previewText={formatRecentPreview(recentEntry, username || "")}
+                    messageTime={formatRecentTime(recentEntry?.last_message_at)}
+                    onClick={() => openChat(user.username)}
+                  />
+                );
+              })
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="p-4 space-y-4">
+          <div className="clay-card rounded-3xl p-4 border border-border/70">
+            <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground font-semibold">Profile</p>
+            <div className="mt-3 flex items-center gap-3">
+              <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} isOnline size="md" />
+              <div className="min-w-0">
+                <p className="font-semibold truncate">{username || "Anonymous"}</p>
+                <p className="text-xs text-muted-foreground">Manage account and display settings</p>
+              </div>
+            </div>
+            <Button className="w-full mt-4" variant="outline" onClick={() => setIsSettingsOpen(true)}>
+              <Settings className="w-4 h-4 mr-2" />
+              Open settings
+            </Button>
+          </div>
+
+          <div className="clay-card rounded-3xl p-4 border border-border/70">
+            <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground font-semibold mb-3">Theme</p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { name: "light", icon: Sun },
+                { name: "dark", icon: Moon },
+                { name: "system", icon: Monitor },
+              ].map((t) => (
+                <button
+                  key={t.name}
+                  onClick={() => setTheme(t.name)}
+                  className={cn(
+                    "h-11 rounded-xl border text-xs font-semibold uppercase tracking-wide flex items-center justify-center gap-1.5",
+                    theme === t.name
+                      ? "bg-primary/14 text-primary border-primary/40"
+                      : "bg-card/70 text-muted-foreground border-border/70"
+                  )}
+                >
+                  <t.icon className="w-4 h-4" />
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Button variant="destructive" className="w-full" onClick={handleLogout}>
+            <LogOut className="w-4 h-4 mr-2" />
+            Sign out
+          </Button>
+        </div>
+      )}
+    </div>
   );
 
   return (
     <PageTransition>
       <AnimatedBackground />
       <div className="h-screen flex flex-col relative z-10">
-        <header className="h-16 md:h-20 px-4 md:px-8 flex items-center justify-between border-b border-border/70 glass">
+        <header className="h-16 md:h-[74px] px-4 md:px-6 flex items-center justify-between border-b border-border/70 glass">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 md:w-11 md:h-11 rounded-2xl gradient-primary text-primary-foreground flex items-center justify-center">
+            <div className="w-11 h-11 rounded-2xl gradient-primary text-primary-foreground flex items-center justify-center shadow-sm">
               <MessageCircle className="w-5 h-5" />
             </div>
             <div className="min-w-0">
               <p className="font-display font-bold text-base md:text-lg truncate">RelayBoy</p>
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                {reconnectAttempt > 0 ? `Reconnecting (${reconnectAttempt})` : "Secure Session"}
+              <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                {reconnectAttempt > 0 ? `Reconnecting (${reconnectAttempt})` : "Secure Workspace"}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 md:gap-3">
+          <div className="flex items-center gap-2">
             {isMobile ? (
               <Button variant="outline" size="icon" className="rounded-xl" onClick={() => setIsUsersSheetOpen(true)}>
                 <PanelLeft className="w-4 h-4" />
               </Button>
             ) : null}
-
-            <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-              <DialogTrigger asChild>
-                <button className="rounded-full" aria-label="Open settings">
-                  <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} isOnline size="md" />
-                </button>
-              </DialogTrigger>
-              <DialogContent className="max-w-md rounded-3xl border-border/70 glass-card p-0 overflow-hidden">
-                <div className="h-24 gradient-primary" />
-                <div className="px-6 pb-6 -mt-10">
-                  <div className="flex items-end justify-between gap-4 mb-6">
-                    <div className="relative group">
-                      <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} size="lg" className="w-20 h-20 ring-4 ring-background" />
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center"
-                      >
-                        <Upload className="w-5 h-5 text-white" />
-                      </button>
-                      <input type="file" ref={fileInputRef} onChange={handleAvatarUpload} className="hidden" accept="image/*" />
-                    </div>
-                    <Button variant="destructive" size="sm" onClick={handleAvatarDelete} disabled={!avatarUrl || uploading}>
-                      <Trash2 className="w-4 h-4 mr-1" />
-                      Remove
-                    </Button>
-                  </div>
-
-                  <h3 className="font-bold text-lg">{username}</h3>
-                  <p className="text-xs text-muted-foreground mb-6 flex items-center gap-1.5">
-                    <Shield className="w-3.5 h-3.5" />
-                    Identity and theme settings
-                  </p>
-
-                  <div className="grid grid-cols-3 gap-2 mb-6">
-                    {[
-                      { name: "dark", icon: Moon },
-                      { name: "light", icon: Sun },
-                      { name: "system", icon: Monitor },
-                    ].map((t) => (
-                      <button
-                        key={t.name}
-                        onClick={() => setTheme(t.name)}
-                        className={cn(
-                          "h-12 rounded-xl border text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-1.5",
-                          theme === t.name
-                            ? "bg-primary/12 text-primary border-primary/40"
-                            : "bg-card/60 text-muted-foreground border-border/70"
-                        )}
-                      >
-                        <t.icon className="w-4 h-4" />
-                        {t.name}
-                      </button>
-                    ))}
-                  </div>
-
-                  <Button variant="destructive" className="w-full" onClick={handleLogout}>
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Sign Out
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-
             <ConnectionStatus status={status} username={username} />
           </div>
         </header>
 
-        <div className="flex-1 flex overflow-hidden p-2 md:p-4 gap-3">
-          <aside className="hidden md:flex w-[330px] rounded-3xl border border-border/70 glass-card overflow-hidden flex-col">
-            {UsersPanel}
+        <div className="flex-1 flex overflow-hidden p-2 md:p-3 gap-3 relative">
+          <div className="pointer-events-none absolute left-[21%] top-[14%] h-52 w-52 rounded-full bg-primary/10 blur-3xl" />
+          <div className="pointer-events-none absolute right-[10%] bottom-[10%] h-60 w-60 rounded-full bg-accent/10 blur-3xl" />
+
+          <aside className="hidden md:flex w-[78px] rounded-3xl glass-card clay-card border border-border/70 p-2 flex-col items-stretch gap-2">
+            {railButtons.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setSidebarTab(item.id)}
+                aria-label={item.label}
+                className={cn(
+                  "h-12 rounded-2xl border flex items-center justify-center transition shadow-sm",
+                  sidebarTab === item.id
+                    ? "bg-primary/16 border-primary/45 text-primary shadow-md"
+                    : "clay-card border-border/70 text-muted-foreground hover:text-foreground hover:shadow-md"
+                )}
+              >
+                <item.icon className="w-[18px] h-[18px]" />
+              </button>
+            ))}
           </aside>
 
-          <main className="flex-1 rounded-3xl border border-border/70 glass-card overflow-hidden flex flex-col">
+          <aside className="hidden md:flex w-[340px] rounded-3xl glass-card clay-card border border-border/70 overflow-hidden">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={sidebarTab}
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                className="h-full w-full"
+              >
+                {SidebarPanel}
+              </motion.div>
+            </AnimatePresence>
+          </aside>
+
+          <main className="flex-1 rounded-3xl glass-card clay-card border border-border/70 overflow-hidden flex flex-col">
             {currentChat ? (
               <>
                 <div className="h-16 px-4 md:px-6 border-b border-border/70 flex items-center justify-between">
@@ -531,10 +594,9 @@ export default function ChatPage() {
                       <p className="text-xs text-muted-foreground">{currentChatUser?.is_online ? "Online" : "Offline"}</p>
                     </div>
                   </div>
-
-                  <button className="w-9 h-9 rounded-xl border border-border/70 bg-card/60 flex items-center justify-center">
-                    <MoreVertical className="w-4 h-4 text-muted-foreground" />
-                  </button>
+                  <div className="text-[11px] px-3 py-1 rounded-full border border-border/80 clay-card text-muted-foreground">
+                    End-to-end secure
+                  </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-4 scrollbar-thin">
@@ -568,22 +630,98 @@ export default function ChatPage() {
               <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
                 <Users className="w-12 h-12 text-primary mb-4" />
                 <p className="font-semibold text-lg mb-1">Select a conversation</p>
-                <p className="text-sm text-muted-foreground mb-5">Unread chats are highlighted automatically.</p>
-                <Button className="md:hidden gradient-primary text-primary-foreground" onClick={() => setIsUsersSheetOpen(true)}>
-                  Browse Users
+                <p className="text-sm text-muted-foreground mb-5">Use recent chats, online users, or settings from the side panel.</p>
+                <Button className="md:hidden" onClick={() => setIsUsersSheetOpen(true)}>
+                  Browse panel
                 </Button>
               </div>
             )}
           </main>
         </div>
 
+        <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+          <DialogContent className="max-w-md rounded-3xl border-border/70 glass-card p-0 overflow-hidden">
+            <div className="h-24 gradient-primary" />
+            <div className="px-6 pb-6 -mt-10">
+              <div className="flex items-end justify-between gap-4 mb-6">
+                <div className="relative group">
+                  <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} size="lg" className="w-20 h-20 ring-4 ring-background" />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="absolute inset-0 rounded-full bg-black/35 opacity-0 group-hover:opacity-100 flex items-center justify-center transition"
+                  >
+                    <Upload className="w-5 h-5 text-white" />
+                  </button>
+                  <input type="file" ref={fileInputRef} onChange={handleAvatarUpload} className="hidden" accept="image/*" />
+                </div>
+                <Button variant="destructive" size="sm" onClick={handleAvatarDelete} disabled={!avatarUrl || uploading}>
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  Remove
+                </Button>
+              </div>
+
+              <h3 className="font-bold text-lg">{username}</h3>
+              <p className="text-xs text-muted-foreground mb-6 flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5" />
+                Profile and theme preferences
+              </p>
+
+              <div className="grid grid-cols-3 gap-2 mb-6">
+                {[
+                  { name: "light", icon: Sun },
+                  { name: "dark", icon: Moon },
+                  { name: "system", icon: Monitor },
+                ].map((t) => (
+                  <button
+                    key={t.name}
+                    onClick={() => setTheme(t.name)}
+                    className={cn(
+                      "h-12 rounded-xl border text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-1.5",
+                      theme === t.name
+                        ? "bg-primary/12 text-primary border-primary/40"
+                        : "bg-card/70 text-muted-foreground border-border/70"
+                    )}
+                  >
+                    <t.icon className="w-4 h-4" />
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+
+              <Button variant="destructive" className="w-full" onClick={handleLogout}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         <Sheet open={isUsersSheetOpen} onOpenChange={setIsUsersSheetOpen}>
-          <SheetContent side="left" className="w-[90vw] sm:max-w-sm p-0 border-border/70 glass-card">
+          <SheetContent side="left" className="w-[92vw] sm:max-w-sm p-0 border-border/70 glass-card">
             <SheetHeader className="px-4 pt-4 pb-2">
-              <SheetTitle>Conversations</SheetTitle>
-              <SheetDescription>Recent and online users</SheetDescription>
+              <SheetTitle>Workspace</SheetTitle>
+              <SheetDescription>Recent chats, online users, and settings</SheetDescription>
             </SheetHeader>
-            <div className="h-[calc(100%-4.5rem)] flex flex-col">{UsersPanel}</div>
+
+            <div className="px-4 pb-3 grid grid-cols-3 gap-2">
+              {railButtons.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setSidebarTab(item.id)}
+                  className={cn(
+                    "h-10 rounded-xl border flex items-center justify-center gap-1.5 text-xs font-semibold",
+                    sidebarTab === item.id
+                      ? "bg-primary/16 border-primary/45 text-primary"
+                      : "border-border/70 text-muted-foreground"
+                  )}
+                >
+                  <item.icon className="w-4 h-4" />
+                  {item.id}
+                </button>
+              ))}
+            </div>
+
+            <div className="h-[calc(100%-8.8rem)] overflow-hidden">{SidebarPanel}</div>
           </SheetContent>
         </Sheet>
 

@@ -8,6 +8,8 @@ interface UserListItemProps {
   isOnline?: boolean;
   isActive?: boolean;
   unreadCount?: number;
+  previewText?: string;
+  messageTime?: string;
   onClick: () => void;
 }
 
@@ -17,25 +19,35 @@ export function UserListItem({
   isOnline = false,
   isActive = false,
   unreadCount = 0,
+  previewText,
+  messageTime,
   onClick,
 }: UserListItemProps) {
   return (
     <motion.button
-      whileHover={{ x: 3 }}
+      whileHover={{ x: 4, y: -1 }}
       whileTap={{ scale: 0.985 }}
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-3 p-3.5 rounded-2xl transition-all duration-200 border text-left",
+        "w-full flex items-center gap-3 p-3.5 rounded-2xl transition-all duration-200 border text-left clay-card shadow-sm",
         isActive
-          ? "bg-primary/12 border-primary/35"
-          : "bg-card/40 border-border/60 hover:bg-card/70"
+          ? "bg-primary/12 border-primary/35 shadow-md"
+          : "border-border/65 hover:border-primary/30 hover:shadow-md"
       )}
     >
       <AvatarBadge name={username} avatarUrl={avatarUrl} isOnline={isOnline} size="sm" />
 
-      <div className="min-w-0 flex-1">
-        <p className={cn("text-sm font-semibold truncate", isActive ? "text-primary" : "text-foreground")}>{username}</p>
-        <p className="text-[11px] text-muted-foreground uppercase tracking-wide">{isOnline ? "Online" : "Offline"}</p>
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className={cn("text-sm font-semibold truncate", isActive ? "text-primary" : "text-foreground")}>{username}</p>
+          {messageTime ? <span className="text-[10px] text-muted-foreground shrink-0">{messageTime}</span> : null}
+        </div>
+        <p className="text-[11px] text-muted-foreground truncate">
+          {previewText?.trim() ? previewText : "No messages yet"}
+        </p>
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          {isOnline ? "Online" : "Offline"}
+        </p>
       </div>
 
       {unreadCount > 0 && !isActive ? (

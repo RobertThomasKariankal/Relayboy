@@ -422,19 +422,23 @@ app.get("/users/recent-chats", async (req, res) => {
     const { data, error } = await withRetry(() =>
       supabase
         .from("messages")
-        .select("from, to, timestamp")
+        .select("from, to, message, timestamp")
         .or(`from.eq."${username}",to.eq."${username}"`)
         .order("timestamp", { ascending: false })
     );
 
     if (error) throw error;
 
-    // Extract unique chat partners and their latest message timestamp
+    // Extract unique chat partners and their latest message payload
     const partnersMap = new Map();
     data.forEach(m => {
       const partner = m.from === username ? m.to : m.from;
       if (!partnersMap.has(partner)) {
-        partnersMap.set(partner, m.timestamp);
+        partnersMap.set(partner, {
+          last_message: m.message || "",
+          last_message_at: m.timestamp,
+          last_message_from: m.from,
+        });
       }
     });
 
@@ -449,9 +453,11 @@ app.get("/users/recent-chats", async (req, res) => {
 
     const partnersDataMap = new Map(userData?.map(u => [u.username, { avatar_url: u.avatar_url, is_online: u.is_online }]));
 
-    const recentChats = Array.from(partnersMap.entries()).map(([username, last_message]) => ({
+    const recentChats = Array.from(partnersMap.entries()).map(([username, payload]) => ({
       username,
-      last_message,
+      last_message: payload.last_message,
+      last_message_at: payload.last_message_at,
+      last_message_from: payload.last_message_from,
       avatar_url: partnersDataMap.get(username)?.avatar_url,
       is_online: partnersDataMap.get(username)?.is_online
     }));

@@ -10,7 +10,7 @@ interface ConnectionStatusProps {
 export function ConnectionStatus({ status, username }: ConnectionStatusProps) {
   if (status === "connecting") {
     return (
-      <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/70 bg-card/60 text-xs">
+      <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/70 glass text-xs">
         <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
         <span className="text-muted-foreground">Connecting...</span>
       </div>
@@ -27,7 +27,7 @@ export function ConnectionStatus({ status, username }: ConnectionStatusProps) {
   }
 
   return (
-    <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/70 bg-card/60 text-xs">
+    <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/70 glass text-xs">
       <Wifi className="h-3.5 w-3.5 text-online" />
       <span className="text-muted-foreground">{username ? `Connected as ${username}` : "Connected"}</span>
     </div>

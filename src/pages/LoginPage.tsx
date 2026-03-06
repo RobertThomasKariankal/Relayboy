@@ -144,11 +144,11 @@ export default function LoginPage() {
       <motion.div
         initial={{ scale: 0.97, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="glass-card quantum-card rounded-[2rem] p-6 sm:p-8 border border-border/70"
+        className="glass-card clay-card quantum-card rounded-[2rem] p-6 sm:p-8 border border-border/70"
       >
-        <div className="flex items-center gap-3 p-3 rounded-xl border border-border/70 bg-amber-500/10 mb-5">
+        <div className="flex items-center gap-3 p-3 rounded-xl border border-amber-500/30 bg-amber-500/12 mb-5">
           <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
-          <p className="text-xs text-amber-200/80">
+          <p className="text-xs text-amber-700 dark:text-amber-200/85">
             Your encrypted key backup was found. Enter your <strong>Master Password</strong> (set during registration) to restore access to your messages.
           </p>
         </div>
@@ -204,7 +204,7 @@ export default function LoginPage() {
       <motion.div
         initial={{ scale: 0.97, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="glass-card quantum-card rounded-[2rem] p-6 sm:p-8 border border-border/70"
+        className="glass-card clay-card quantum-card rounded-[2rem] p-6 sm:p-8 border border-border/70"
       >
         <div className="grid grid-cols-2 gap-2 rounded-xl border border-border/70 p-1 bg-card/70 mb-6">
           <button

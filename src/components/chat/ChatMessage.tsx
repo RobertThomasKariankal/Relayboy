@@ -29,16 +29,16 @@ export function ChatMessage({ message, timestamp, isSent, senderName, isSeen, de
       <div className={cn("flex flex-col", isSent ? "items-end" : "items-start")}>
         <div
           className={cn(
-            "px-4 py-3 rounded-2xl border text-sm leading-relaxed",
+            "px-4 py-3 rounded-2xl border text-sm leading-relaxed shadow-sm",
             isSent
-              ? "bg-chat-sent text-primary-foreground border-primary/40 rounded-br-sm"
-              : "bg-chat-received text-foreground border-border/80 rounded-bl-sm"
+              ? "bg-chat-sent text-primary-foreground border-primary/45 rounded-br-sm"
+              : "bg-chat-received text-foreground border-border/80 rounded-bl-sm glass"
           )}
         >
           {message}
         </div>
         <div className="flex items-center gap-1.5 mt-1.5 px-2">
-          <span className="text-[10px] text-muted-foreground/60 font-semibold">
+          <span className="text-[10px] text-muted-foreground/70 font-semibold">
             {timestamp}
           </span>
           {isSent && (

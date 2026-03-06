@@ -25,7 +25,7 @@ export default function AuthShell({
       <AnimatedBackground />
       <div className="min-h-screen flex items-center justify-center p-4 relative z-10">
         <div className={`w-full ${maxWidthClassName}`}>
-          <motion.div initial={{ y: -16, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="text-center mb-8">
+          <motion.div initial={{ y: -16, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="text-center mb-7">
             <div className="inline-flex items-center justify-center w-16 h-16 gradient-primary rounded-2xl shadow-xl glow-primary mb-4">
               {icon}
             </div>

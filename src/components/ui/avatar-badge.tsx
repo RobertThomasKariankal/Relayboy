@@ -21,7 +21,7 @@ export function AvatarBadge({ name, avatarUrl, isOnline = false, size = "md", cl
     <div className={cn("relative", className)}>
       <div
         className={cn(
-          "gradient-primary rounded-full flex items-center justify-center font-semibold text-primary-foreground shadow-lg overflow-hidden",
+          "gradient-primary rounded-full flex items-center justify-center font-semibold text-primary-foreground shadow-md overflow-hidden",
           sizeClasses[size]
         )}
       >
@@ -32,7 +32,7 @@ export function AvatarBadge({ name, avatarUrl, isOnline = false, size = "md", cl
         )}
       </div>
       {isOnline && (
-        <span className="absolute bottom-0 right-0 w-3 h-3 bg-online rounded-full border-2 border-background" />
+        <span className="absolute bottom-0 right-0 w-3 h-3 bg-online rounded-full border-2 border-card" />
       )}
     </div>
   );

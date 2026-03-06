@@ -150,7 +150,7 @@ export default function VerifyOtpPage() {
     >
       <AnimatePresence mode="wait">
         {step === "otp" ? (
-          <motion.div key="otp" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="glass-card quantum-card rounded-[2rem] p-6 sm:p-8 border border-border/70">
+          <motion.div key="otp" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="glass-card clay-card quantum-card rounded-[2rem] p-6 sm:p-8 border border-border/70">
             <div className="flex items-center gap-3 p-3 rounded-xl border border-border/70 bg-card/65 mb-7">
               <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center">
                 <Mail className="w-5 h-5 text-primary-foreground" />
@@ -194,10 +194,10 @@ export default function VerifyOtpPage() {
             </div>
           </motion.div>
         ) : (
-          <motion.div key="master_password" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="glass-card quantum-card rounded-[2rem] p-6 sm:p-8 border border-border/70">
-            <div className="flex items-center gap-3 p-3 rounded-xl border border-border/70 bg-amber-500/10 mb-5">
+          <motion.div key="master_password" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="glass-card clay-card quantum-card rounded-[2rem] p-6 sm:p-8 border border-border/70">
+            <div className="flex items-center gap-3 p-3 rounded-xl border border-amber-500/30 bg-amber-500/12 mb-5">
               <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
-              <p className="text-xs text-amber-200/80">
+              <p className="text-xs text-amber-700 dark:text-amber-200/85">
                 This password encrypts your private key for cross-device access. <strong>If you forget it, your backup cannot be recovered.</strong>
               </p>
             </div>
