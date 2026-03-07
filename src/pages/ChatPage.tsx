@@ -13,6 +13,7 @@ import {
   Users,
   LogOut,
   Search,
+  X,
   MoreVertical,
   Moon,
   Sun,
@@ -21,11 +22,12 @@ import {
   Upload,
   Shield,
   PanelLeft,
+  MessageSquareText,
 } from "lucide-react";
 import PageTransition from "@/components/PageTransition";
 import AnimatedBackground from "@/components/AnimatedBackground";
 import { motion, AnimatePresence } from "framer-motion";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "next-themes";
@@ -66,6 +68,7 @@ export default function ChatPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ username: string; avatar_url?: string }[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isSidebarSearchOpen, setIsSidebarSearchOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -355,54 +358,76 @@ export default function ChatPage() {
       : recentListWithUnread;
 
   const currentChatUser = currentChat ? userMap.get(normalizeName(currentChat)) : undefined;
+  const connectionTone =
+    status === "connected" ? "bg-emerald-400" : status === "connecting" ? "bg-amber-400" : "bg-red-400";
 
   const UsersPanel = (
     <>
-      <div className="p-4 border-b border-border/70">
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search users"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full h-10 pl-10 pr-3 rounded-xl glass-input text-sm focus:outline-none focus:ring-2 focus:ring-ring/25"
-          />
+      <div className="px-4 pt-4 pb-3 border-b border-white/10">
+        {isMobile || isSidebarSearchOpen ? (
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search users"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full h-10 pl-10 pr-3 rounded-2xl glass-input text-sm focus:outline-none focus:ring-2 focus:ring-primary/25"
+            />
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">
+            {searchQuery.trim() ? "Search Results" : sidebarTab === "online" ? "Online Users" : "Recent Chats"}
+          </p>
+          {searchQuery.trim() ? (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear
+            </button>
+          ) : null}
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={() => setSidebarTab("recent")}
-            className={cn(
-              "h-9 rounded-xl text-xs font-bold uppercase tracking-wider border",
-              sidebarTab === "recent"
-                ? "bg-primary/12 text-primary border-primary/40"
-                : "bg-card/50 text-muted-foreground border-border/70"
-            )}
-          >
-            Recent
-          </button>
-          <button
-            onClick={() => setSidebarTab("online")}
-            className={cn(
-              "h-9 rounded-xl text-xs font-bold uppercase tracking-wider border",
-              sidebarTab === "online"
-                ? "bg-primary/12 text-primary border-primary/40"
-                : "bg-card/50 text-muted-foreground border-border/70"
-            )}
-          >
-            Online
-          </button>
-        </div>
+        {isMobile ? (
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            <button
+              onClick={() => setSidebarTab("recent")}
+              className={cn(
+                "h-9 rounded-xl text-[11px] font-semibold uppercase tracking-[0.14em] border transition-all duration-200",
+                sidebarTab === "recent"
+                  ? "bg-white/14 text-white border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
+                  : "bg-white/5 text-muted-foreground border-white/10 hover:bg-white/8"
+              )}
+            >
+              Recent
+            </button>
+            <button
+              onClick={() => setSidebarTab("online")}
+              className={cn(
+                "h-9 rounded-xl text-[11px] font-semibold uppercase tracking-[0.14em] border transition-all duration-200",
+                sidebarTab === "online"
+                  ? "bg-white/14 text-white border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
+                  : "bg-white/5 text-muted-foreground border-white/10 hover:bg-white/8"
+              )}
+            >
+              Online
+            </button>
+          </div>
+        ) : null}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin">
+      <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5 scrollbar-thin">
         {isSearching ? (
           <div className="h-32 flex items-center justify-center">
-            <div className="w-6 h-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            <div className="w-6 h-6 rounded-full border-2 border-white/60 border-t-transparent animate-spin" />
           </div>
         ) : activeList.length === 0 ? (
-          <div className="h-36 flex items-center justify-center text-sm text-muted-foreground">No users found</div>
+          <div className="h-36 flex flex-col items-center justify-center text-center text-sm text-muted-foreground px-4">
+            <p>No users found</p>
+          </div>
         ) : (
           activeList.map((user) => (
             <UserListItem
@@ -420,105 +445,157 @@ export default function ChatPage() {
     </>
   );
 
+  const SettingsDialog = (
+    <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+      <DialogContent className="max-w-md rounded-3xl border-white/20 glass-panel p-0 overflow-hidden">
+        <div className="h-24 gradient-primary" />
+        <div className="px-6 pb-6 -mt-10">
+          <div className="flex items-end justify-between gap-4 mb-6">
+            <div className="relative group">
+              <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} size="lg" className="w-20 h-20 ring-4 ring-background" />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center"
+              >
+                <Upload className="w-5 h-5 text-white" />
+              </button>
+              <input type="file" ref={fileInputRef} onChange={handleAvatarUpload} className="hidden" accept="image/*" />
+            </div>
+            <Button variant="destructive" size="sm" onClick={handleAvatarDelete} disabled={!avatarUrl || uploading}>
+              <Trash2 className="w-4 h-4 mr-1" />
+              Remove
+            </Button>
+          </div>
+
+          <h3 className="font-bold text-lg">{username}</h3>
+          <p className="text-xs text-muted-foreground mb-6 flex items-center gap-1.5">
+            <Shield className="w-3.5 h-3.5" />
+            Identity and theme settings
+          </p>
+
+          <div className="grid grid-cols-3 gap-2 mb-6">
+            {[
+              { name: "dark", icon: Moon },
+              { name: "light", icon: Sun },
+              { name: "system", icon: Monitor },
+            ].map((t) => (
+              <button
+                key={t.name}
+                onClick={() => setTheme(t.name)}
+                className={cn(
+                  "h-12 rounded-xl border text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-1.5 transition-all duration-200",
+                  theme === t.name
+                    ? "bg-primary/12 text-primary border-primary/40"
+                    : "bg-card/60 text-muted-foreground border-border/70"
+                )}
+              >
+                <t.icon className="w-4 h-4" />
+                {t.name}
+              </button>
+            ))}
+          </div>
+
+          <Button variant="destructive" className="w-full" onClick={handleLogout}>
+            <LogOut className="w-4 h-4 mr-2" />
+            Sign Out
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+
   return (
     <PageTransition>
       <AnimatedBackground />
-      <div className="h-screen flex flex-col relative z-10">
-        <header className="h-16 md:h-20 px-4 md:px-8 flex items-center justify-between border-b border-border/70 glass">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 md:w-11 md:h-11 rounded-2xl gradient-primary text-primary-foreground flex items-center justify-center">
-              <MessageCircle className="w-5 h-5" />
+      <div className="h-screen relative z-10 p-2.5 md:p-4 lg:p-5">
+        {isMobile ? (
+          <header className="mb-3 h-14 px-3.5 rounded-2xl glass-card-soft flex items-center justify-between">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl glass-chip flex items-center justify-center">
+                <MessageCircle className="w-4 h-4 text-foreground/90" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-display text-sm font-semibold truncate">RelayBoy</p>
+                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {reconnectAttempt > 0 ? `Reconnecting (${reconnectAttempt})` : "Secure Session"}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="font-display font-bold text-base md:text-lg truncate">RelayBoy</p>
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                {reconnectAttempt > 0 ? `Reconnecting (${reconnectAttempt})` : "Secure Session"}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 md:gap-3">
-            {isMobile ? (
-              <Button variant="outline" size="icon" className="rounded-xl" onClick={() => setIsUsersSheetOpen(true)}>
+            <div className="flex items-center gap-2">
+              <button className="rounded-full" onClick={() => setIsSettingsOpen(true)} aria-label="Open settings">
+                <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} isOnline size="sm" />
+              </button>
+              <Button variant="outline" size="icon" className="rounded-xl border-white/15 bg-white/5" onClick={() => setIsUsersSheetOpen(true)}>
                 <PanelLeft className="w-4 h-4" />
               </Button>
-            ) : null}
+            </div>
+          </header>
+        ) : null}
 
-            <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-              <DialogTrigger asChild>
-                <button className="rounded-full" aria-label="Open settings">
-                  <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} isOnline size="md" />
-                </button>
-              </DialogTrigger>
-              <DialogContent className="max-w-md rounded-3xl border-border/70 glass-card p-0 overflow-hidden">
-                <div className="h-24 gradient-primary" />
-                <div className="px-6 pb-6 -mt-10">
-                  <div className="flex items-end justify-between gap-4 mb-6">
-                    <div className="relative group">
-                      <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} size="lg" className="w-20 h-20 ring-4 ring-background" />
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center"
-                      >
-                        <Upload className="w-5 h-5 text-white" />
-                      </button>
-                      <input type="file" ref={fileInputRef} onChange={handleAvatarUpload} className="hidden" accept="image/*" />
-                    </div>
-                    <Button variant="destructive" size="sm" onClick={handleAvatarDelete} disabled={!avatarUrl || uploading}>
-                      <Trash2 className="w-4 h-4 mr-1" />
-                      Remove
-                    </Button>
-                  </div>
+        <div className="h-full md:grid md:grid-cols-[72px_minmax(270px,320px)_minmax(0,1fr)] overflow-visible gap-3 lg:gap-4">
+          <aside className="hidden md:flex rounded-[24px] glass-panel flex-col items-center py-3 px-2.5 relative overflow-visible z-30">
+            <div className="w-11 h-11 rounded-2xl glass-chip flex items-center justify-center text-foreground/90">
+              <MessageCircle className="w-5 h-5" />
+            </div>
+            <p className="mt-2 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Relay</p>
 
-                  <h3 className="font-bold text-lg">{username}</h3>
-                  <p className="text-xs text-muted-foreground mb-6 flex items-center gap-1.5">
-                    <Shield className="w-3.5 h-3.5" />
-                    Identity and theme settings
-                  </p>
+            <div className="mt-4 w-full space-y-2">
+              <button
+                onClick={() => setSidebarTab("recent")}
+                aria-label="Recent chats"
+                className={cn(
+                  "mx-auto h-11 w-11 rounded-2xl border flex items-center justify-center transition-all duration-200",
+                  sidebarTab === "recent"
+                    ? "bg-white/14 border-white/20 text-white shadow-[0_10px_30px_-20px_rgba(120,160,255,0.9),inset_0_1px_0_rgba(255,255,255,0.2)]"
+                    : "bg-white/[0.05] border-white/10 text-muted-foreground hover:bg-white/[0.09] hover:text-foreground"
+                )}
+              >
+                <MessageSquareText className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setIsSidebarSearchOpen((prev) => !prev)}
+                aria-label="Search users"
+                className={cn(
+                  "mx-auto h-11 w-11 rounded-2xl border flex items-center justify-center transition-all duration-200",
+                  isSidebarSearchOpen || !!searchQuery.trim()
+                    ? "bg-white/14 border-white/20 text-white shadow-[0_10px_30px_-20px_rgba(120,160,255,0.9),inset_0_1px_0_rgba(255,255,255,0.2)]"
+                    : "bg-white/[0.05] border-white/10 text-muted-foreground hover:bg-white/[0.09] hover:text-foreground"
+                )}
+              >
+                <Search className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setSidebarTab("online")}
+                aria-label="Online users"
+                className={cn(
+                  "mx-auto h-11 w-11 rounded-2xl border flex items-center justify-center transition-all duration-200",
+                  sidebarTab === "online"
+                    ? "bg-white/14 border-white/20 text-white shadow-[0_10px_30px_-20px_rgba(120,160,255,0.9),inset_0_1px_0_rgba(255,255,255,0.2)]"
+                    : "bg-white/[0.05] border-white/10 text-muted-foreground hover:bg-white/[0.09] hover:text-foreground"
+                )}
+              >
+                <Users className="w-4 h-4" />
+              </button>
+            </div>
 
-                  <div className="grid grid-cols-3 gap-2 mb-6">
-                    {[
-                      { name: "dark", icon: Moon },
-                      { name: "light", icon: Sun },
-                      { name: "system", icon: Monitor },
-                    ].map((t) => (
-                      <button
-                        key={t.name}
-                        onClick={() => setTheme(t.name)}
-                        className={cn(
-                          "h-12 rounded-xl border text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-1.5",
-                          theme === t.name
-                            ? "bg-primary/12 text-primary border-primary/40"
-                            : "bg-card/60 text-muted-foreground border-border/70"
-                        )}
-                      >
-                        <t.icon className="w-4 h-4" />
-                        {t.name}
-                      </button>
-                    ))}
-                  </div>
+            <div className="mt-auto w-full flex flex-col items-center gap-2.5">
+              <div className="w-11 h-11 rounded-2xl border border-white/10 bg-white/[0.05] flex items-center justify-center">
+                <span className={cn("h-2.5 w-2.5 rounded-full", connectionTone)} />
+              </div>
+              <button className="rounded-full" onClick={() => setIsSettingsOpen(true)} aria-label="Open settings">
+                <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} isOnline size="md" />
+              </button>
+            </div>
+          </aside>
 
-                  <Button variant="destructive" className="w-full" onClick={handleLogout}>
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Sign Out
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            <ConnectionStatus status={status} username={username} />
-          </div>
-        </header>
-
-        <div className="flex-1 flex overflow-hidden p-2 md:p-4 gap-3">
-          <aside className="hidden md:flex w-[330px] rounded-3xl border border-border/70 glass-card overflow-hidden flex-col">
+          <aside className="hidden md:flex glass-panel-soft rounded-[26px] overflow-hidden flex-col min-h-0 relative z-10">
             {UsersPanel}
           </aside>
 
-          <main className="flex-1 rounded-3xl border border-border/70 glass-card overflow-hidden flex flex-col">
+          <main className="glass-panel rounded-[30px] overflow-hidden flex flex-col min-h-0 relative z-0">
             {currentChat ? (
               <>
-                <div className="h-16 px-4 md:px-6 border-b border-border/70 flex items-center justify-between">
+                <div className="h-16 md:h-[74px] px-4 md:px-6 border-b border-white/10 flex items-center justify-between">
                   <div className="flex items-center gap-3 min-w-0">
                     <AvatarBadge
                       name={currentChat}
@@ -527,20 +604,23 @@ export default function ChatPage() {
                       size="md"
                     />
                     <div className="min-w-0">
-                      <p className="font-semibold truncate">{currentChat}</p>
-                      <p className="text-xs text-muted-foreground">{currentChatUser?.is_online ? "Online" : "Offline"}</p>
+                      <p className="font-semibold text-base truncate">{currentChat}</p>
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{currentChatUser?.is_online ? "Online" : "Offline"}</p>
                     </div>
                   </div>
 
-                  <button className="w-9 h-9 rounded-xl border border-border/70 bg-card/60 flex items-center justify-center">
-                    <MoreVertical className="w-4 h-4 text-muted-foreground" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <ConnectionStatus status={status} username={username} />
+                    <button className="w-9 h-9 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center">
+                      <MoreVertical className="w-4 h-4 text-muted-foreground" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-4 scrollbar-thin">
+                <div className="flex-1 overflow-y-auto px-4 md:px-7 py-5 md:py-6 flex flex-col gap-4 scrollbar-thin">
                   {currentMessages.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center">
-                      <MessageCircle className="w-12 h-12 text-primary mb-4" />
+                      <MessageCircle className="w-12 h-12 text-white/80 mb-4" />
                       <p className="font-semibold">No messages yet</p>
                       <p className="text-sm text-muted-foreground">Start a secure conversation with @{currentChat}</p>
                     </div>
@@ -560,13 +640,13 @@ export default function ChatPage() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                <div className="p-3 md:p-4 border-t border-border/70">
+                <div className="px-3 md:px-6 pb-3 md:pb-5 pt-1 border-t border-white/10">
                   <ChatInput onSend={handleSendMessage} disabled={status !== "connected"} placeholder={`Message ${currentChat}`} />
                 </div>
               </>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-                <Users className="w-12 h-12 text-primary mb-4" />
+                <Users className="w-12 h-12 text-white/75 mb-4" />
                 <p className="font-semibold text-lg mb-1">Select a conversation</p>
                 <p className="text-sm text-muted-foreground mb-5">Unread chats are highlighted automatically.</p>
                 <Button className="md:hidden gradient-primary text-primary-foreground" onClick={() => setIsUsersSheetOpen(true)}>
@@ -578,7 +658,7 @@ export default function ChatPage() {
         </div>
 
         <Sheet open={isUsersSheetOpen} onOpenChange={setIsUsersSheetOpen}>
-          <SheetContent side="left" className="w-[90vw] sm:max-w-sm p-0 border-border/70 glass-card">
+          <SheetContent side="left" className="w-[90vw] sm:max-w-sm p-0 border-white/15 glass-panel-soft">
             <SheetHeader className="px-4 pt-4 pb-2">
               <SheetTitle>Conversations</SheetTitle>
               <SheetDescription>Recent and online users</SheetDescription>
@@ -586,6 +666,8 @@ export default function ChatPage() {
             <div className="h-[calc(100%-4.5rem)] flex flex-col">{UsersPanel}</div>
           </SheetContent>
         </Sheet>
+
+        {SettingsDialog}
 
         <AnimatePresence>
           {error ? (

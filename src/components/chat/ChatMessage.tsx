@@ -18,7 +18,7 @@ export function ChatMessage({ message, timestamp, isSent, senderName, isSeen, de
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className={cn("flex gap-3 max-w-[86%]", isSent ? "self-end flex-row-reverse" : "self-start")}
+      className={cn("flex gap-3 max-w-[88%]", isSent ? "self-end flex-row-reverse" : "self-start")}
     >
       {!isSent ? (
         <div className="shrink-0 self-end mb-5">
@@ -29,10 +29,10 @@ export function ChatMessage({ message, timestamp, isSent, senderName, isSeen, de
       <div className={cn("flex flex-col", isSent ? "items-end" : "items-start")}>
         <div
           className={cn(
-            "px-4 py-3 rounded-2xl border text-sm leading-relaxed",
+            "px-4 py-3 rounded-2xl border text-sm leading-relaxed backdrop-blur-md shadow-[0_15px_30px_-24px_rgba(0,0,0,0.85)]",
             isSent
-              ? "bg-chat-sent text-primary-foreground border-primary/40 rounded-br-sm"
-              : "bg-chat-received text-foreground border-border/80 rounded-bl-sm"
+              ? "bg-[hsl(var(--chat-bubble-sent)/0.24)] text-foreground border-white/20 rounded-br-md"
+              : "bg-white/[0.07] text-foreground border-white/12 rounded-bl-md"
           )}
         >
           {message}

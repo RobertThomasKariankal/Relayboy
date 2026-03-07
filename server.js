@@ -112,6 +112,13 @@ app.get("/api/config", (req, res) => {
   });
 });
 
+app.get("/api/auth-status", (req, res) => {
+  res.json({
+    authenticated: !!req.session?.authenticated,
+    username: req.session?.username || null,
+  });
+});
+
 app.post("/register", async (req, res) => {
   const { email, username, password } = req.body;
   console.log(`[Registration] Attempt for user: ${username}, email: ${email}`);

@@ -26,12 +26,32 @@ interface WSMessage {
   message?: string;
   timestamp?: string;
   error?: string;
-  handshake?: any;
+  handshake?: WSHandshakeData;
   with?: string;
-  messages?: any[];
+  messages?: WSHistoryMessage[];
   counts?: { [user: string]: number };
   encrypted?: boolean;
   peer_public_key?: string;
+}
+
+interface WSHandshakeData {
+  type?: "provide_public_key";
+  ciphertext?: string;
+  public_key?: string;
+  receiver?: string;
+  sender?: string;
+  created_at?: string;
+}
+
+interface WSHistoryMessage {
+  id?: string | number;
+  from_user?: string;
+  from?: string;
+  message: string;
+  is_seen?: boolean;
+  created_at?: string | number;
+  timestamp?: string | number;
+  encrypted?: boolean;
 }
 
 export interface ChatUser {
@@ -60,6 +80,7 @@ export function useWebSocket() {
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(true);
+  const connectLogicRef = useRef<() => Promise<void>>(async () => {});
 
   const clearReconnectTimer = () => {
     if (reconnectTimeoutRef.current !== null) {
@@ -68,7 +89,7 @@ export function useWebSocket() {
     }
   };
 
-  const getOrCreateSession = async (peer: string, handshakeData?: any, peerPublicKey?: string) => {
+  const getOrCreateSession = async (peer: string, handshakeData?: WSHandshakeData, peerPublicKey?: string) => {
     const peerKey = peer.toLowerCase();
 
     // Only use in-memory cache if we have NO new handshake data to validate against
@@ -205,13 +226,47 @@ export function useWebSocket() {
     return await initPromise;
   };
 
-  const connectLogic = () => {
+  const connectLogic = async () => {
     if (socketRef.current?.readyState === WebSocket.OPEN || socketRef.current?.readyState === WebSocket.CONNECTING) {
       return;
     }
 
     shouldReconnectRef.current = true;
     clearReconnectTimer();
+
+    try {
+      const authRes = await fetch("/api/auth-status", {
+        credentials: "include",
+      });
+      if (!authRes.ok) {
+        throw new Error(`Auth check failed: ${authRes.status}`);
+      }
+
+      const authData = await authRes.json();
+      if (!authData?.authenticated) {
+        shouldReconnectRef.current = false;
+        setStatus("disconnected");
+        setError("Session expired. Please log in again.");
+        return;
+      }
+    } catch (err) {
+      console.error("Auth check before WS connect failed:", err);
+      setStatus("disconnected");
+      setError("Unable to verify session. Retrying...");
+      if (!shouldReconnectRef.current) return;
+      if (reconnectTimeoutRef.current !== null) return;
+
+      const attempt = reconnectAttemptsRef.current + 1;
+      reconnectAttemptsRef.current = attempt;
+      setReconnectAttempt(attempt);
+
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 10000);
+      reconnectTimeoutRef.current = window.setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        void connectLogic();
+      }, delay);
+      return;
+    }
 
     const protocol = window.location.hostname === "localhost" ? "ws" : "wss";
     const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
@@ -314,7 +369,7 @@ export function useWebSocket() {
 
       if (data.type === "history" && data.with && data.messages) {
         const peerKey = data.with.toLowerCase();
-        let processedMessages: ChatMessage[] = data.messages.map((m) => {
+        const processedMessages: ChatMessage[] = data.messages.map((m) => {
           if (m.id) processedMessageIds.current.add(m.id);
           return {
             id: m.id,
@@ -396,7 +451,7 @@ export function useWebSocket() {
       const delay = Math.min(1000 * 2 ** (attempt - 1), 10000);
       reconnectTimeoutRef.current = window.setTimeout(() => {
         reconnectTimeoutRef.current = null;
-        connect();
+        void connectLogic();
       }, delay);
     };
 
@@ -407,7 +462,10 @@ export function useWebSocket() {
     };
   };
 
-  const connect = useCallback(connectLogic, []);
+  connectLogicRef.current = connectLogic;
+  const connect = useCallback(() => {
+    void connectLogicRef.current();
+  }, []);
 
   const sendMessage = useCallback(async (to: string, message: string) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
