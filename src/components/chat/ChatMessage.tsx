@@ -7,11 +7,12 @@ interface ChatMessageProps {
   timestamp: string;
   isSent: boolean;
   senderName?: string;
+  avatarUrl?: string;
   isSeen?: boolean;
   deliveryStatus?: "sending" | "delivered" | "seen" | "failed";
 }
 
-export function ChatMessage({ message, timestamp, isSent, senderName, isSeen, deliveryStatus }: ChatMessageProps) {
+export function ChatMessage({ message, timestamp, isSent, senderName, avatarUrl, isSeen, deliveryStatus }: ChatMessageProps) {
   const status = deliveryStatus || (isSeen ? "seen" : "delivered");
 
   return (
@@ -22,7 +23,7 @@ export function ChatMessage({ message, timestamp, isSent, senderName, isSeen, de
     >
       {!isSent ? (
         <div className="shrink-0 self-end mb-5">
-          <AvatarBadge name={senderName || "?"} size="sm" className="w-8 h-8" />
+          <AvatarBadge name={senderName || "?"} avatarUrl={avatarUrl} size="sm" className="w-8 h-8" />
         </div>
       ) : null}
 

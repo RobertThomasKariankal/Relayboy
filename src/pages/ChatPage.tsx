@@ -750,6 +750,7 @@ export default function ChatPage() {
                         isSeen={msg.is_seen}
                         deliveryStatus={msg.delivery_status}
                         senderName={msg.from !== username ? msg.from : undefined}
+                        avatarUrl={msg.from !== username ? userMap.get(normalizeName(msg.from))?.avatar_url : avatarUrl}
                       />
                     ))
                   )}
