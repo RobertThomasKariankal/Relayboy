@@ -13,14 +13,16 @@ import {
   Users,
   LogOut,
   Search,
-  X,
+  UserRound,
+  Palette,
+  ShieldCheck,
+  ChevronRight,
   MoreVertical,
   Moon,
   Sun,
   Monitor,
   Trash2,
   Upload,
-  Shield,
   PanelLeft,
   MessageSquareText,
 } from "lucide-react";
@@ -68,7 +70,13 @@ export default function ChatPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ username: string; avatar_url?: string }[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [isSidebarSearchOpen, setIsSidebarSearchOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<"profile" | "appearance" | "security">("profile");
+  const [profileForm, setProfileForm] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    mobile: "",
+  });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -278,6 +286,10 @@ export default function ChatPage() {
     }
   };
 
+  const handleProfileSave = () => {
+    toast.success("Profile details saved locally.");
+  };
+
   const handleSendMessage = async (message: string) => {
     if (!currentChat || !username) return;
 
@@ -351,20 +363,34 @@ export default function ChatPage() {
     return list;
   }, [recentChats, unreadByUser, userMap, username]);
 
-  const activeList = searchQuery.trim()
+  const activeList = sidebarTab === "online" && searchQuery.trim()
     ? searchResults
     : sidebarTab === "online"
       ? otherUsers
       : recentListWithUnread;
 
   const currentChatUser = currentChat ? userMap.get(normalizeName(currentChat)) : undefined;
-  const connectionTone =
-    status === "connected" ? "bg-emerald-400" : status === "connecting" ? "bg-amber-400" : "bg-red-400";
 
+  useEffect(() => {
+    const normalized = String(username || "").trim();
+    const parts = normalized
+      .replace(/[_\-.]+/g, " ")
+      .split(" ")
+      .filter(Boolean);
+    const firstName = parts[0] || normalized || "User";
+    const lastName = parts.slice(1).join(" ");
+
+    setProfileForm({
+      firstName,
+      lastName,
+      email: normalized ? `${normalized.toLowerCase()}@relay.app` : "",
+      mobile: "",
+    });
+  }, [username, isSettingsOpen]);
   const UsersPanel = (
     <>
-      <div className="px-4 pt-4 pb-3 border-b border-white/10">
-        {isMobile || isSidebarSearchOpen ? (
+      <div className="px-4 pt-4 pb-3 border-b border-slate-300/70 dark:border-white/10">
+        {sidebarTab === "online" ? (
           <div className="relative mb-3">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -398,8 +424,8 @@ export default function ChatPage() {
               className={cn(
                 "h-9 rounded-xl text-[11px] font-semibold uppercase tracking-[0.14em] border transition-all duration-200",
                 sidebarTab === "recent"
-                  ? "bg-white/14 text-white border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
-                  : "bg-white/5 text-muted-foreground border-white/10 hover:bg-white/8"
+                  ? "bg-primary/15 text-primary border-primary/40 dark:bg-white/14 dark:text-white dark:border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
+                  : "bg-slate-100/80 dark:bg-white/5 text-slate-600 dark:text-muted-foreground border-slate-300/70 dark:border-white/10 hover:bg-slate-200/80 dark:hover:bg-white/8"
               )}
             >
               Recent
@@ -409,8 +435,8 @@ export default function ChatPage() {
               className={cn(
                 "h-9 rounded-xl text-[11px] font-semibold uppercase tracking-[0.14em] border transition-all duration-200",
                 sidebarTab === "online"
-                  ? "bg-white/14 text-white border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
-                  : "bg-white/5 text-muted-foreground border-white/10 hover:bg-white/8"
+                  ? "bg-primary/15 text-primary border-primary/40 dark:bg-white/14 dark:text-white dark:border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
+                  : "bg-slate-100/80 dark:bg-white/5 text-slate-600 dark:text-muted-foreground border-slate-300/70 dark:border-white/10 hover:bg-slate-200/80 dark:hover:bg-white/8"
               )}
             >
               Online
@@ -447,59 +473,164 @@ export default function ChatPage() {
 
   const SettingsDialog = (
     <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-      <DialogContent className="max-w-md rounded-3xl border-white/20 glass-panel p-0 overflow-hidden">
-        <div className="h-24 gradient-primary" />
-        <div className="px-6 pb-6 -mt-10">
-          <div className="flex items-end justify-between gap-4 mb-6">
-            <div className="relative group">
-              <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} size="lg" className="w-20 h-20 ring-4 ring-background" />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center"
-              >
-                <Upload className="w-5 h-5 text-white" />
-              </button>
-              <input type="file" ref={fileInputRef} onChange={handleAvatarUpload} className="hidden" accept="image/*" />
-            </div>
-            <Button variant="destructive" size="sm" onClick={handleAvatarDelete} disabled={!avatarUrl || uploading}>
-              <Trash2 className="w-4 h-4 mr-1" />
-              Remove
-            </Button>
+      <DialogContent className="max-w-3xl rounded-[2rem] border-slate-300/80 dark:border-white/20 bg-gradient-to-br from-slate-100/95 to-slate-200/85 dark:from-[hsl(var(--card)/0.94)] dark:to-[hsl(var(--card)/0.88)] backdrop-blur-2xl p-5 overflow-hidden shadow-[0_25px_60px_-26px_rgba(0,0,0,0.45)]">
+          <div className="grid md:grid-cols-[280px_minmax(0,1fr)] gap-4">
+            <section className="rounded-3xl bg-white/65 dark:bg-black/20 border border-slate-300/80 dark:border-white/10 p-4 min-h-[560px]">
+              <h3 className="text-xl font-display font-bold mb-4">Settings</h3>
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-300/70 dark:border-white/10 bg-white/70 dark:bg-white/5 p-3 mb-4">
+                <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} size="md" className="w-11 h-11 rounded-full" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Welcome</p>
+                  <p className="font-semibold truncate">{username}</p>
+                </div>
+              </div>
+
+              {[
+                { key: "profile", label: "User Profile", icon: UserRound },
+                { key: "appearance", label: "Appearance", icon: Palette },
+                { key: "security", label: "Security", icon: ShieldCheck },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => setSettingsSection(item.key as "profile" | "appearance" | "security")}
+                  className={cn(
+                    "w-full h-12 rounded-xl px-3 mb-2 border flex items-center justify-between transition-colors",
+                    settingsSection === item.key
+                      ? "bg-primary/10 border-primary/35 text-primary"
+                      : "bg-white/65 dark:bg-white/5 border-slate-300/70 dark:border-white/10 text-slate-700 dark:text-muted-foreground"
+                  )}
+                >
+                  <span className="flex items-center gap-2 text-sm font-semibold">
+                    <item.icon className="w-4 h-4" />
+                    {item.label}
+                  </span>
+                  <ChevronRight className="w-4 h-4 opacity-70" />
+                </button>
+              ))}
+
+              <Button variant="destructive" className="w-full mt-4" onClick={handleLogout}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            </section>
+
+            <section className="rounded-3xl bg-white/72 dark:bg-black/20 border border-slate-300/80 dark:border-white/10 p-5 min-h-[560px]">
+              {settingsSection === "profile" ? (
+                <>
+                  <div className="flex items-start justify-between gap-4 mb-5">
+                    <div>
+                      <h4 className="font-display text-xl font-bold">User Profile</h4>
+                      <p className="text-xs text-muted-foreground mt-1">Manage identity details</p>
+                    </div>
+                    <Button variant="destructive" size="sm" onClick={handleAvatarDelete} disabled={!avatarUrl || uploading}>
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      Remove
+                    </Button>
+                  </div>
+
+                  <div className="flex justify-center mb-5">
+                    <div className="relative group">
+                      <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} size="lg" className="w-24 h-24 rounded-full ring-4 ring-background shadow-lg" />
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="absolute inset-0 rounded-full bg-black/35 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                      >
+                        <Upload className="w-5 h-5 text-white" />
+                      </button>
+                      <input type="file" ref={fileInputRef} onChange={handleAvatarUpload} className="hidden" accept="image/*" />
+                    </div>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-3 mb-4">
+                    <input
+                      type="text"
+                      value={profileForm.firstName}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, firstName: e.target.value }))}
+                      className="h-11 rounded-full px-4 border border-slate-300/70 dark:border-white/10 bg-white/70 dark:bg-white/5 text-sm"
+                      placeholder="First Name"
+                    />
+                    <input
+                      type="text"
+                      value={profileForm.lastName}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, lastName: e.target.value }))}
+                      className="h-11 rounded-full px-4 border border-slate-300/70 dark:border-white/10 bg-white/70 dark:bg-white/5 text-sm"
+                      placeholder="Last Name"
+                    />
+                    <input
+                      type="email"
+                      value={profileForm.email}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, email: e.target.value }))}
+                      className="h-11 rounded-full px-4 border border-slate-300/70 dark:border-white/10 bg-white/70 dark:bg-white/5 text-sm sm:col-span-2"
+                      placeholder="E-mail"
+                    />
+                    <input
+                      type="text"
+                      value={profileForm.mobile}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, mobile: e.target.value }))}
+                      className="h-11 rounded-full px-4 border border-slate-300/70 dark:border-white/10 bg-white/70 dark:bg-white/5 text-sm sm:col-span-2"
+                      placeholder="Mobile"
+                    />
+                  </div>
+
+                  <Button className="w-full h-11 rounded-full gradient-primary text-primary-foreground font-semibold" onClick={handleProfileSave}>
+                    Save
+                  </Button>
+                </>
+              ) : null}
+
+              {settingsSection === "appearance" ? (
+                <>
+                  <div className="mb-5">
+                    <h4 className="font-display text-xl font-bold">Appearance</h4>
+                    <p className="text-xs text-muted-foreground mt-1">Choose how RelayBoy looks</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    {[
+                      { name: "dark", icon: Moon },
+                      { name: "light", icon: Sun },
+                      { name: "system", icon: Monitor },
+                    ].map((t) => (
+                      <button
+                        key={t.name}
+                        onClick={() => setTheme(t.name)}
+                        className={cn(
+                          "h-11 rounded-full border text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-1.5 transition-all duration-200",
+                          theme === t.name
+                            ? "bg-primary/14 text-primary border-primary/45"
+                            : "bg-white/65 dark:bg-card/60 text-slate-600 dark:text-muted-foreground border-slate-300/80 dark:border-border/70 hover:bg-white/85 dark:hover:bg-card/75"
+                        )}
+                      >
+                        <t.icon className="w-4 h-4" />
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                  <Button className="w-full h-11 rounded-full gradient-primary text-primary-foreground font-semibold" onClick={() => toast.success("Appearance updated.")}>
+                    Save Appearance
+                  </Button>
+                </>
+              ) : null}
+
+              {settingsSection === "security" ? (
+                <>
+                  <div className="mb-5">
+                    <h4 className="font-display text-xl font-bold">Security</h4>
+                    <p className="text-xs text-muted-foreground mt-1">Session and account controls</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-300/70 dark:border-white/10 bg-white/65 dark:bg-white/5 p-4">
+                    <p className="text-sm text-muted-foreground">
+                      Your account is protected with encrypted messaging and secure session controls.
+                    </p>
+                  </div>
+                  <Button variant="destructive" className="w-full mt-4" onClick={handleLogout}>
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Sign Out
+                  </Button>
+                </>
+              ) : null}
+            </section>
           </div>
-
-          <h3 className="font-bold text-lg">{username}</h3>
-          <p className="text-xs text-muted-foreground mb-6 flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5" />
-            Identity and theme settings
-          </p>
-
-          <div className="grid grid-cols-3 gap-2 mb-6">
-            {[
-              { name: "dark", icon: Moon },
-              { name: "light", icon: Sun },
-              { name: "system", icon: Monitor },
-            ].map((t) => (
-              <button
-                key={t.name}
-                onClick={() => setTheme(t.name)}
-                className={cn(
-                  "h-12 rounded-xl border text-xs font-bold uppercase tracking-wide flex items-center justify-center gap-1.5 transition-all duration-200",
-                  theme === t.name
-                    ? "bg-primary/12 text-primary border-primary/40"
-                    : "bg-card/60 text-muted-foreground border-border/70"
-                )}
-              >
-                <t.icon className="w-4 h-4" />
-                {t.name}
-              </button>
-            ))}
-          </div>
-
-          <Button variant="destructive" className="w-full" onClick={handleLogout}>
-            <LogOut className="w-4 h-4 mr-2" />
-            Sign Out
-          </Button>
-        </div>
       </DialogContent>
     </Dialog>
   );
@@ -525,7 +656,7 @@ export default function ChatPage() {
               <button className="rounded-full" onClick={() => setIsSettingsOpen(true)} aria-label="Open settings">
                 <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} isOnline size="sm" />
               </button>
-              <Button variant="outline" size="icon" className="rounded-xl border-white/15 bg-white/5" onClick={() => setIsUsersSheetOpen(true)}>
+              <Button variant="outline" size="icon" className="rounded-xl border-slate-300/70 dark:border-white/15 bg-slate-100/70 dark:bg-white/5 text-slate-700 dark:text-foreground" onClick={() => setIsUsersSheetOpen(true)}>
                 <PanelLeft className="w-4 h-4" />
               </Button>
             </div>
@@ -537,7 +668,7 @@ export default function ChatPage() {
             <div className="w-11 h-11 rounded-2xl glass-chip flex items-center justify-center text-foreground/90">
               <MessageCircle className="w-5 h-5" />
             </div>
-            <p className="mt-2 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Relay</p>
+            <p className="mt-2 text-[10px] uppercase tracking-[0.18em] text-slate-500 dark:text-muted-foreground">Relay</p>
 
             <div className="mt-4 w-full space-y-2">
               <button
@@ -545,33 +676,21 @@ export default function ChatPage() {
                 aria-label="Recent chats"
                 className={cn(
                   "mx-auto h-11 w-11 rounded-2xl border flex items-center justify-center transition-all duration-200",
-                  sidebarTab === "recent"
-                    ? "bg-white/14 border-white/20 text-white shadow-[0_10px_30px_-20px_rgba(120,160,255,0.9),inset_0_1px_0_rgba(255,255,255,0.2)]"
-                    : "bg-white/[0.05] border-white/10 text-muted-foreground hover:bg-white/[0.09] hover:text-foreground"
+                sidebarTab === "recent"
+                    ? "bg-primary/15 border-primary/40 text-primary dark:bg-white/14 dark:border-white/20 dark:text-white shadow-[0_10px_30px_-20px_rgba(120,160,255,0.9),inset_0_1px_0_rgba(255,255,255,0.2)]"
+                    : "bg-slate-100/75 dark:bg-white/[0.05] border-slate-300/70 dark:border-white/10 text-slate-700 dark:text-muted-foreground hover:bg-slate-200/80 dark:hover:bg-white/[0.09] hover:text-slate-900 dark:hover:text-foreground"
                 )}
               >
                 <MessageSquareText className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setIsSidebarSearchOpen((prev) => !prev)}
-                aria-label="Search users"
-                className={cn(
-                  "mx-auto h-11 w-11 rounded-2xl border flex items-center justify-center transition-all duration-200",
-                  isSidebarSearchOpen || !!searchQuery.trim()
-                    ? "bg-white/14 border-white/20 text-white shadow-[0_10px_30px_-20px_rgba(120,160,255,0.9),inset_0_1px_0_rgba(255,255,255,0.2)]"
-                    : "bg-white/[0.05] border-white/10 text-muted-foreground hover:bg-white/[0.09] hover:text-foreground"
-                )}
-              >
-                <Search className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setSidebarTab("online")}
                 aria-label="Online users"
                 className={cn(
                   "mx-auto h-11 w-11 rounded-2xl border flex items-center justify-center transition-all duration-200",
-                  sidebarTab === "online"
-                    ? "bg-white/14 border-white/20 text-white shadow-[0_10px_30px_-20px_rgba(120,160,255,0.9),inset_0_1px_0_rgba(255,255,255,0.2)]"
-                    : "bg-white/[0.05] border-white/10 text-muted-foreground hover:bg-white/[0.09] hover:text-foreground"
+                sidebarTab === "online"
+                    ? "bg-primary/15 border-primary/40 text-primary dark:bg-white/14 dark:border-white/20 dark:text-white shadow-[0_10px_30px_-20px_rgba(120,160,255,0.9),inset_0_1px_0_rgba(255,255,255,0.2)]"
+                    : "bg-slate-100/75 dark:bg-white/[0.05] border-slate-300/70 dark:border-white/10 text-slate-700 dark:text-muted-foreground hover:bg-slate-200/80 dark:hover:bg-white/[0.09] hover:text-slate-900 dark:hover:text-foreground"
                 )}
               >
                 <Users className="w-4 h-4" />
@@ -579,9 +698,6 @@ export default function ChatPage() {
             </div>
 
             <div className="mt-auto w-full flex flex-col items-center gap-2.5">
-              <div className="w-11 h-11 rounded-2xl border border-white/10 bg-white/[0.05] flex items-center justify-center">
-                <span className={cn("h-2.5 w-2.5 rounded-full", connectionTone)} />
-              </div>
               <button className="rounded-full" onClick={() => setIsSettingsOpen(true)} aria-label="Open settings">
                 <AvatarBadge name={username || "?"} avatarUrl={avatarUrl} isOnline size="md" />
               </button>

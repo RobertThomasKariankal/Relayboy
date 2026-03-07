@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import AnimatedBackground from "@/components/AnimatedBackground";
 import PageTransition from "@/components/PageTransition";
+import ThemeToggle from "@/components/ThemeToggle";
 import type { ReactNode } from "react";
 
 interface AuthShellProps {
@@ -24,6 +25,9 @@ export default function AuthShell({
     <PageTransition>
       <AnimatedBackground />
       <div className="min-h-screen flex items-center justify-center p-4 relative z-10">
+        <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
+          <ThemeToggle />
+        </div>
         <div className={`w-full ${maxWidthClassName}`}>
           <motion.div initial={{ y: -16, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 gradient-primary rounded-2xl shadow-xl glow-primary mb-4">

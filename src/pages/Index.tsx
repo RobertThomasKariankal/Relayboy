@@ -4,6 +4,7 @@ import { MessageCircle, Users, Zap, Shield, ArrowRight, LockKeyhole } from "luci
 import PageTransition from "@/components/PageTransition";
 import AnimatedBackground from "@/components/AnimatedBackground";
 import { motion } from "framer-motion";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const features = [
   {
@@ -40,6 +41,7 @@ export default function Index() {
           </div>
 
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Link to="/login">
               <Button variant="ghost" className="rounded-xl">Sign in</Button>
             </Link>
