@@ -3,6 +3,7 @@ import express from "express";
 import http from "http";
 import { WebSocketServer } from "ws";
 import path from "path";
+import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import cookieParser from "cookie-parser";
 import session from "express-session";
@@ -12,10 +13,6 @@ import { fileURLToPath } from "url";
 
 import { supabase } from "./db.js";
 import redis from "./redisClient.js";
-import { KyberKeyGenerator, uint8ArrayToBase64 } from "./kyber/kyber-keygen.js";
-import { KyberEncapsulator } from "./kyber/kyber-encapsulate.js";
-import { KyberDecapsulator } from "./kyber/kyber-decapsulate.js";
-import { base64ToUint8Array } from "./kyber/kyber-keygen.js";
 
 // Mailgun API sending (replaces SMTP)
 
@@ -23,9 +20,26 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const isProd = process.env.NODE_ENV === "production";
+const explicitAllowedOrigins = new Set(
+  [process.env.APP_ORIGIN, "http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:3000", "http://127.0.0.1:3000"]
+    .filter(Boolean)
+);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return !isProd;
+  if (explicitAllowedOrigins.has(origin)) return true;
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    if (isProd && host.endsWith(".onrender.com")) return true;
+  } catch {
+    return false;
+  }
+  return false;
+}
 
 // ---------------- Startup Checks ----------------
-const requiredEnv = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SENDGRID_API_KEY", "SENDGRID_FROM_EMAIL", "REDIS_URL"];
+const requiredEnv = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SENDGRID_API_KEY", "SENDGRID_FROM_EMAIL", "REDIS_URL", "SESSION_SECRET"];
 const missingEnv = requiredEnv.filter(env => !process.env[env]);
 if (missingEnv.length > 0) {
   console.error("❌ Missing required environment variables:", missingEnv.join(", "));
@@ -42,13 +56,63 @@ const __dirname = path.dirname(__filename);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+if (isProd) {
+  app.set("trust proxy", 1);
+}
 
 const sessionParser = session({
+  name: "rb.sid",
   saveUninitialized: false,
-  secret: process.env.SESSION_SECRET || "relayboy_secret_fallback",
-  resave: false
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
+  resave: false,
+  rolling: true,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProd,
+    maxAge: 1000 * 60 * 60 * 12,
+  },
 });
 app.use(sessionParser);
+
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (isProd) {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  next();
+});
+
+function enforceOrigin(req, res, next) {
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return next();
+  const origin = req.headers.origin;
+  if (isAllowedOrigin(origin)) return next();
+  return res.status(403).json({ error: "Blocked by origin policy" });
+}
+
+function createRateLimiter({ windowMs, max, prefix }) {
+  const bucket = new Map();
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = `${prefix}:${req.ip || "unknown"}`;
+    const prev = bucket.get(key);
+    if (!prev || now - prev.start > windowMs) {
+      bucket.set(key, { count: 1, start: now });
+      return next();
+    }
+    if (prev.count >= max) {
+      return res.status(429).json({ error: "Too many requests. Please try again later." });
+    }
+    prev.count += 1;
+    return next();
+  };
+}
+
+app.use(enforceOrigin);
 
 app.use(express.static(path.join(__dirname, "dist")));
 
@@ -71,6 +135,14 @@ function generateOTP() {
 
 function normalizeUsername(value) {
   return String(value || "").toLowerCase();
+}
+
+function isValidUsername(value) {
+  return typeof value === "string" && /^[a-zA-Z0-9_.-]{3,32}$/.test(value);
+}
+
+function isValidEmail(value) {
+  return typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 function isPasswordStrong(password) {
@@ -105,13 +177,6 @@ app.use((req, res, next) => {
 });
 
 // ---------------- REGISTER (SEND OTP) ----------------
-app.get("/api/config", (req, res) => {
-  res.json({
-    url: process.env.SUPABASE_URL,
-    key: process.env.SUPABASE_ANON_KEY
-  });
-});
-
 app.get("/api/auth-status", (req, res) => {
   res.json({
     authenticated: !!req.session?.authenticated,
@@ -119,7 +184,11 @@ app.get("/api/auth-status", (req, res) => {
   });
 });
 
-app.post("/register", async (req, res) => {
+const registerRateLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, prefix: "register" });
+const verifyOtpRateLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 30, prefix: "verify-otp" });
+const loginRateLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 40, prefix: "login" });
+
+app.post("/register", registerRateLimiter, async (req, res) => {
   const { email, username, password } = req.body;
   console.log(`[Registration] Attempt for user: ${username}, email: ${email}`);
 
@@ -128,6 +197,9 @@ app.post("/register", async (req, res) => {
       console.warn("[Registration] Missing fields");
       return res.status(400).json({ error: "Missing fields" });
     }
+    if (!isValidEmail(email) || !isValidUsername(username)) {
+      return res.status(400).json({ error: "Invalid email or username format" });
+    }
 
     if (!isPasswordStrong(password)) {
       console.warn("[Registration] Weak password");
@@ -135,19 +207,16 @@ app.post("/register", async (req, res) => {
     }
 
     console.log("[Registration] Checking for existing user...");
-    const { data, error: fetchError } = await withRetry(() =>
-      supabase
-        .from("users")
-        .select("email, username")
-        .or(`email.eq.${email},username.eq.${username}`)
+    const { data: emailMatch, error: emailErr } = await withRetry(() =>
+      supabase.from("users").select("email").eq("email", email).limit(1)
     );
-
-    if (fetchError) {
-      console.error("[Registration] Supabase fetch error:", fetchError);
-      throw fetchError;
+    const { data: userMatch, error: userErr } = await withRetry(() =>
+      supabase.from("users").select("username").eq("username", username).limit(1)
+    );
+    if (emailErr || userErr) {
+      throw emailErr || userErr;
     }
-
-    if (data?.length) {
+    if ((emailMatch && emailMatch.length > 0) || (userMatch && userMatch.length > 0)) {
       console.warn("[Registration] User already exists");
       return res.status(400).json({ error: "User already exists" });
     }
@@ -196,12 +265,18 @@ app.post("/register", async (req, res) => {
 });
 
 // ---------------- VERIFY OTP ----------------
-app.post("/verify-register-otp", async (req, res) => {
+app.post("/verify-register-otp", verifyOtpRateLimiter, async (req, res) => {
   const { email, otp } = req.body;
   const { kyber_public_key, encrypted_private_key, backup_salt, backup_iv } = req.body;
   console.log(`[Verify OTP] Attempt for email: ${email}`);
 
   try {
+    if (!isValidEmail(email) || !/^\d{6}$/.test(String(otp || ""))) {
+      return res.status(400).json({ error: "Invalid verification payload" });
+    }
+    if (typeof kyber_public_key !== "string" || kyber_public_key.length < 100) {
+      return res.status(400).json({ error: "Invalid Kyber public key" });
+    }
     const cached = await redis.get(`register:${email}`);
     if (!cached) {
       console.warn("[Verify OTP] OTP expired or not found");
@@ -214,7 +289,6 @@ app.post("/verify-register-otp", async (req, res) => {
       return res.status(400).json({ error: "Invalid OTP" });
     }
 
-    const { kyber_public_key } = req.body;
     if (!kyber_public_key) {
       return res.status(400).json({ error: "Missing Kyber public key" });
     }
@@ -251,69 +325,21 @@ app.post("/verify-register-otp", async (req, res) => {
   }
 });
 
-// ---------------- KYBER ENDPOINTS ----------------
-app.post("/api/kyber/keygen", async (req, res) => {
-  try {
-    const keyGen = new KyberKeyGenerator();
-    const { publicKey, privateKey } = await keyGen.generateKeyPair();
-    res.json({
-      publicKey: uint8ArrayToBase64(publicKey),
-      privateKey: uint8ArrayToBase64(privateKey)
-    });
-  } catch (err) {
-    console.error("[Kyber KeyGen Error]:", err);
-    res.status(500).json({ error: "Key generation failed" });
-  }
-});
-
-app.post("/api/kyber/encapsulate", async (req, res) => {
-  try {
-    const { publicKey } = req.body;
-    if (!publicKey) return res.status(400).json({ error: "Missing public key" });
-
-    const encapsulator = new KyberEncapsulator();
-    const pubKeyUint8 = base64ToUint8Array(publicKey);
-    const { ciphertext, sharedSecret } = await encapsulator.encapsulate(pubKeyUint8);
-
-    res.json({
-      ciphertext: uint8ArrayToBase64(ciphertext),
-      sharedSecret: uint8ArrayToBase64(sharedSecret)
-    });
-  } catch (err) {
-    console.error("[Kyber Encapsulate Error]:", err);
-    res.status(500).json({ error: "Encapsulation failed" });
-  }
-});
-
-app.post("/api/kyber/decapsulate", async (req, res) => {
-  try {
-    const { ciphertext, privateKey } = req.body;
-    if (!ciphertext || !privateKey) return res.status(400).json({ error: "Missing ciphertext or private key" });
-
-    const decapsulator = new KyberDecapsulator();
-    const cipherUint8 = base64ToUint8Array(ciphertext);
-    const privKeyUint8 = base64ToUint8Array(privateKey);
-    const sharedSecret = await decapsulator.decapsulate(cipherUint8, privKeyUint8);
-
-    res.json({
-      sharedSecret: uint8ArrayToBase64(sharedSecret)
-    });
-  } catch (err) {
-    console.error("[Kyber Decapsulate Error]:", err);
-    res.status(500).json({ error: "Decapsulation failed" });
-  }
-});
-
 // ---------------- LOGIN ----------------
-app.post("/login", async (req, res) => {
+app.post("/login", loginRateLimiter, async (req, res) => {
   const { emailOrUsername, password } = req.body;
+  const loginValue = String(emailOrUsername || "").trim();
+  if (!loginValue || !password) {
+    return res.status(400).json({ error: "Missing credentials" });
+  }
+  if (!isValidEmail(loginValue) && !isValidUsername(loginValue)) {
+    return res.status(400).json({ error: "Invalid credentials format" });
+  }
 
   const { data } = await withRetry(() =>
-    supabase
-      .from("users")
-      .select("*")
-      .or(`email.eq.${emailOrUsername},username.eq.${emailOrUsername}`)
-      .limit(1)
+    isValidEmail(loginValue)
+      ? supabase.from("users").select("*").eq("email", loginValue).limit(1)
+      : supabase.from("users").select("*").eq("username", loginValue).limit(1)
   );
 
   const user = data?.[0];
@@ -390,7 +416,11 @@ app.post("/logout", async (req, res) => {
   }
 
   req.session.destroy(() => {
-    res.clearCookie('connect.sid'); // Ensure cookie is cleared
+    res.clearCookie("rb.sid", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: isProd,
+    });
     res.json({ ok: true });
   });
 });
@@ -400,6 +430,8 @@ app.get("/users/search", async (req, res) => {
   if (!req.session.authenticated) return res.status(401).json({ error: "Unauthorized" });
   const { q } = req.query;
   const username = req.session.username;
+  const query = String(q || "").trim();
+  if (query.length < 1 || query.length > 32) return res.json([]);
 
   try {
     const { data, error } = await withRetry(() =>
@@ -407,7 +439,7 @@ app.get("/users/search", async (req, res) => {
         .from("users")
         .select("username")
         .neq("username", username)
-        .ilike("username", `%${q}%`)
+        .ilike("username", `%${query}%`)
         .limit(10)
     );
 
@@ -510,6 +542,17 @@ function scheduleOfflineUpdate(username, socketKey) {
   pendingOfflineTimers.set(socketKey, timer);
 }
 
+function rejectUpgrade(socket, statusCode, message) {
+  try {
+    socket.write(
+      `HTTP/1.1 ${statusCode} ${message}\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n${message}`
+    );
+  } catch {
+    // ignore write failures on half-closed sockets
+  }
+  socket.destroy();
+}
+
 async function broadcastUsers() {
   try {
     // Only fetch users who are actually marked as online in the DB
@@ -535,8 +578,16 @@ async function broadcastUsers() {
 }
 
 server.on("upgrade", (req, socket, head) => {
+  const origin = req.headers.origin;
+  if (!isAllowedOrigin(origin)) {
+    rejectUpgrade(socket, 403, "Forbidden");
+    return;
+  }
   sessionParser(req, {}, () => {
-    if (!req.session.authenticated) return socket.destroy();
+    if (!req.session?.authenticated) {
+      rejectUpgrade(socket, 401, "Unauthorized");
+      return;
+    }
     wss.handleUpgrade(req, socket, head, ws =>
       wss.emit("connection", ws, req)
     );
@@ -612,6 +663,8 @@ wss.on("connection", async (ws, req) => {
       console.log(`📩 Received WS message: ${data.type} from ${username}`);
 
       if (data.type === "message") {
+        if (!isValidUsername(String(data.to || ""))) return;
+        if (typeof data.message !== "string" || data.message.length > 20000) return;
         const isEncrypted = typeof data.message === "string" && data.message.startsWith("QE1:");
         if (!isEncrypted) {
           ws.send(JSON.stringify({
@@ -659,6 +712,7 @@ wss.on("connection", async (ws, req) => {
           });
         }
       } else if (data.type === "typing") {
+        if (!isValidUsername(String(data.to || ""))) return;
         const targetKey = normalizeUsername(data.to);
         const targetSockets = clients.get(targetKey);
         if (targetSockets) {
@@ -673,6 +727,7 @@ wss.on("connection", async (ws, req) => {
         }
       } else if (data.type === "seen") {
         const targetUsername = data.to;
+        if (!isValidUsername(String(targetUsername || ""))) return;
         const targetKey = normalizeUsername(targetUsername);
         // Persist seen status in DB
         const { error: seenError } = await withRetry(() =>
@@ -700,6 +755,7 @@ wss.on("connection", async (ws, req) => {
       }
       else if (data.type === "get_history") {
         const peerKey = data.to;
+        if (!isValidUsername(String(peerKey || ""))) return;
         const myKey = username;
         console.log(`📜 Fetching history/handshake for ${myKey} ↔ ${peerKey}`);
 
@@ -778,6 +834,8 @@ wss.on("connection", async (ws, req) => {
       else if (data.type === "store_handshake") {
         // Client-side encapsulation finished, store the ciphertext
         const { to, ciphertext } = data;
+        if (!isValidUsername(String(to || ""))) return;
+        if (typeof ciphertext !== "string" || ciphertext.length > 4096) return;
         console.log(`🔐 Storing new handshake from ${username} to ${to}`);
 
         // Delete any existing handshakes first to prevent stale rows being returned

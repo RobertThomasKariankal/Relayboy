@@ -1,6 +1,7 @@
 /**
- * 🗄️ IndexedDB Manager for Quantum Relayboy
- * Stores sensitive client-side data: Private Keys, Shared Secrets, and Ratchet States.
+ * Client-side secure storage.
+ * - User keys: IndexedDB persistence
+ * - Session/decrypted cache: in-memory only (cleared on refresh)
  */
 
 const DB_NAME = "relayboy_secure_storage";
@@ -27,6 +28,8 @@ export interface DecryptedMessageRecord {
 
 export class SecureDB {
   private db: IDBDatabase | null = null;
+  private runtimeSessions = new Map<string, SessionRecord>();
+  private runtimeDecryptedCache = new Map<string, string>();
 
   async init(): Promise<void> {
     if (this.db) return;
@@ -82,54 +85,35 @@ export class SecureDB {
   // --- Sessions Store ---
 
   async saveSession(record: SessionRecord): Promise<void> {
-    await this.init();
-    return this.performTransaction("sessions", "readwrite", (store) => store.put(record));
+    this.runtimeSessions.set(record.peerUsername.toLowerCase(), {
+      ...record,
+      peerUsername: record.peerUsername.toLowerCase(),
+    });
   }
 
   async getSession(peerUsername: string): Promise<SessionRecord | null> {
-    await this.init();
-    return this.performTransaction("sessions", "readonly", (store) => store.get(peerUsername.toLowerCase()));
+    return this.runtimeSessions.get(peerUsername.toLowerCase()) || null;
   }
 
   async deleteSession(peerUsername: string): Promise<void> {
-    await this.init();
-    return this.performTransaction("sessions", "readwrite", (store) => store.delete(peerUsername.toLowerCase()));
+    this.runtimeSessions.delete(peerUsername.toLowerCase());
   }
 
   // --- Decrypted Message Cache ---
 
   async cacheDecryptedMessage(id: string | number, plaintext: string): Promise<void> {
-    await this.init();
-    return this.performTransaction("decrypted_cache", "readwrite", (store) =>
-      store.put({ id: String(id), plaintext })
-    );
+    this.runtimeDecryptedCache.set(String(id), plaintext);
   }
 
   async getCachedMessages(ids: (string | number)[]): Promise<Map<string, string>> {
-    await this.init();
     const result = new Map<string, string>();
-    if (!this.db || ids.length === 0) return result;
-
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction("decrypted_cache", "readonly");
-      const store = transaction.objectStore("decrypted_cache");
-      let pending = ids.length;
-
-      for (const id of ids) {
-        const req = store.get(String(id));
-        req.onsuccess = () => {
-          if (req.result) {
-            result.set(String(id), req.result.plaintext);
-          }
-          pending--;
-          if (pending === 0) resolve(result);
-        };
-        req.onerror = () => {
-          pending--;
-          if (pending === 0) resolve(result);
-        };
+    for (const id of ids) {
+      const key = String(id);
+      if (this.runtimeDecryptedCache.has(key)) {
+        result.set(key, this.runtimeDecryptedCache.get(key)!);
       }
-    });
+    }
+    return result;
   }
 
   // --- Generic Transaction Helper ---
