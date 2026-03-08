@@ -81,6 +81,10 @@ export function useWebSocket() {
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(true);
   const connectLogicRef = useRef<() => Promise<void>>(async () => {});
+  const historyDecryptFailuresRef = useRef<Map<string, { attempts: number; lastRecoveryAt: number }>>(new Map());
+
+  const HISTORY_RECOVERY_ATTEMPTS = 2;
+  const HISTORY_RECOVERY_COOLDOWN_MS = 5000;
 
   const clearReconnectTimer = () => {
     if (reconnectTimeoutRef.current !== null) {
@@ -408,6 +412,40 @@ export function useWebSocket() {
 
             return msg;
           });
+
+          const failedDecryptCount = finalMessages.reduce((count, msg) => {
+            if (
+              msg.message.includes("[Decryption Failed]") ||
+              msg.message.includes("[Format Error]")
+            ) {
+              return count + 1;
+            }
+            return count;
+          }, 0);
+
+          if (failedDecryptCount > 0) {
+            const now = Date.now();
+            const state = historyDecryptFailuresRef.current.get(peerKey) || { attempts: 0, lastRecoveryAt: 0 };
+            const nextAttempts = state.attempts + 1;
+            historyDecryptFailuresRef.current.set(peerKey, {
+              attempts: nextAttempts,
+              lastRecoveryAt: state.lastRecoveryAt,
+            });
+
+            const canRecover =
+              nextAttempts >= HISTORY_RECOVERY_ATTEMPTS &&
+              now - state.lastRecoveryAt > HISTORY_RECOVERY_COOLDOWN_MS;
+
+            if (canRecover) {
+              console.warn(`[Crypto] Repeated history decrypt failures for ${peerKey}. Re-establishing session.`);
+              sessionsRef.current.delete(peerKey);
+              await secureDB.deleteSession(peerKey);
+              historyDecryptFailuresRef.current.set(peerKey, { attempts: 0, lastRecoveryAt: now });
+              socketRef.current?.send(JSON.stringify({ type: "get_history", to: data.with }));
+            }
+          } else {
+            historyDecryptFailuresRef.current.delete(peerKey);
+          }
 
           setHistory({
             with: data.with,

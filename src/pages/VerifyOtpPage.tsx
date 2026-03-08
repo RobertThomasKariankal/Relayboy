@@ -60,8 +60,8 @@ export default function VerifyOtpPage() {
     setError("");
 
     try {
-      // Generate Kyber keys in-browser
-      console.log("🔐 Generating Post-Quantum Kyber keys in browser...");
+      // Generate Kyber keys on backend
+      console.log("🔐 Generating Post-Quantum Kyber keys via backend API...");
 
       const { publicKey: publicKeyB64, privateKey: privateKeyB64 } = await kyberKeygen();
 

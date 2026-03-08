@@ -1,7 +1,7 @@
 /**
  * Client-side secure storage.
  * - User keys: IndexedDB persistence
- * - Session/decrypted cache: in-memory only (cleared on refresh)
+ * - Sessions/decrypted cache: IndexedDB persistence + runtime memory cache
  */
 
 const DB_NAME = "relayboy_secure_storage";
@@ -85,34 +85,82 @@ export class SecureDB {
   // --- Sessions Store ---
 
   async saveSession(record: SessionRecord): Promise<void> {
-    this.runtimeSessions.set(record.peerUsername.toLowerCase(), {
+    const normalized: SessionRecord = {
       ...record,
       peerUsername: record.peerUsername.toLowerCase(),
-    });
+    };
+    this.runtimeSessions.set(normalized.peerUsername, normalized);
+    await this.init();
+    await this.performTransaction("sessions", "readwrite", (store) => store.put(normalized));
   }
 
   async getSession(peerUsername: string): Promise<SessionRecord | null> {
-    return this.runtimeSessions.get(peerUsername.toLowerCase()) || null;
+    const normalizedPeer = peerUsername.toLowerCase();
+    const runtime = this.runtimeSessions.get(normalizedPeer);
+    if (runtime) return runtime;
+
+    await this.init();
+    const persisted = await this.performTransaction<SessionRecord | undefined>(
+      "sessions",
+      "readonly",
+      (store) => store.get(normalizedPeer)
+    );
+    if (!persisted) return null;
+
+    const normalized: SessionRecord = {
+      ...persisted,
+      peerUsername: persisted.peerUsername.toLowerCase(),
+    };
+    this.runtimeSessions.set(normalizedPeer, normalized);
+    return normalized;
   }
 
   async deleteSession(peerUsername: string): Promise<void> {
-    this.runtimeSessions.delete(peerUsername.toLowerCase());
+    const normalizedPeer = peerUsername.toLowerCase();
+    this.runtimeSessions.delete(normalizedPeer);
+    await this.init();
+    await this.performTransaction("sessions", "readwrite", (store) => store.delete(normalizedPeer));
   }
 
   // --- Decrypted Message Cache ---
 
   async cacheDecryptedMessage(id: string | number, plaintext: string): Promise<void> {
-    this.runtimeDecryptedCache.set(String(id), plaintext);
+    const key = String(id);
+    this.runtimeDecryptedCache.set(key, plaintext);
+    await this.init();
+    await this.performTransaction("decrypted_cache", "readwrite", (store) =>
+      store.put({ id: key, plaintext } satisfies DecryptedMessageRecord)
+    );
   }
 
   async getCachedMessages(ids: (string | number)[]): Promise<Map<string, string>> {
     const result = new Map<string, string>();
+    const missingIds: string[] = [];
+
     for (const id of ids) {
       const key = String(id);
       if (this.runtimeDecryptedCache.has(key)) {
         result.set(key, this.runtimeDecryptedCache.get(key)!);
+      } else {
+        missingIds.push(key);
       }
     }
+
+    if (missingIds.length === 0) return result;
+
+    await this.init();
+    for (const key of missingIds) {
+      const record = await this.performTransaction<DecryptedMessageRecord | undefined>(
+        "decrypted_cache",
+        "readonly",
+        (store) => store.get(key)
+      );
+      if (record?.plaintext) {
+        this.runtimeDecryptedCache.set(key, record.plaintext);
+        result.set(key, record.plaintext);
+      }
+    }
+
     return result;
   }
 

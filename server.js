@@ -13,6 +13,9 @@ import { fileURLToPath } from "url";
 
 import { supabase } from "./db.js";
 import redis from "./redisClient.js";
+import { KyberKeyGenerator, uint8ArrayToBase64, base64ToUint8Array } from "./kyber/kyber-keygen.js";
+import { KyberEncapsulator } from "./kyber/kyber-encapsulate.js";
+import { KyberDecapsulator } from "./kyber/kyber-decapsulate.js";
 
 // Mailgun API sending (replaces SMTP)
 
@@ -187,6 +190,7 @@ app.get("/api/auth-status", (req, res) => {
 const registerRateLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 20, prefix: "register" });
 const verifyOtpRateLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 30, prefix: "verify-otp" });
 const loginRateLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 40, prefix: "login" });
+const kyberRateLimiter = createRateLimiter({ windowMs: 5 * 60 * 1000, max: 180, prefix: "kyber" });
 
 app.post("/register", registerRateLimiter, async (req, res) => {
   const { email, username, password } = req.body;
@@ -322,6 +326,65 @@ app.post("/verify-register-otp", verifyOtpRateLimiter, async (req, res) => {
   } catch (err) {
     console.error("[Verify OTP] Critical Error:", err);
     res.status(500).json({ error: "Verification failed. Please try again later.", details: err.message });
+  }
+});
+
+// ---------------- KYBER API ----------------
+app.post("/api/kyber/keygen", kyberRateLimiter, async (_req, res) => {
+  try {
+    const keyGen = new KyberKeyGenerator();
+    const { publicKey, privateKey } = await keyGen.generateKeyPair();
+    res.json({
+      publicKey: uint8ArrayToBase64(publicKey),
+      privateKey: uint8ArrayToBase64(privateKey),
+    });
+  } catch (err) {
+    console.error("[Kyber KeyGen Error]:", err);
+    res.status(500).json({ error: "Key generation failed" });
+  }
+});
+
+app.post("/api/kyber/encapsulate", kyberRateLimiter, async (req, res) => {
+  if (!req.session?.authenticated) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { publicKey } = req.body;
+    if (typeof publicKey !== "string" || publicKey.length < 100) {
+      return res.status(400).json({ error: "Missing or invalid public key" });
+    }
+
+    const encapsulator = new KyberEncapsulator();
+    const pubKeyUint8 = base64ToUint8Array(publicKey);
+    const { ciphertext, sharedSecret } = await encapsulator.encapsulate(pubKeyUint8);
+
+    res.json({
+      ciphertext: uint8ArrayToBase64(ciphertext),
+      sharedSecret: uint8ArrayToBase64(sharedSecret),
+    });
+  } catch (err) {
+    console.error("[Kyber Encapsulate Error]:", err);
+    res.status(500).json({ error: "Encapsulation failed" });
+  }
+});
+
+app.post("/api/kyber/decapsulate", kyberRateLimiter, async (req, res) => {
+  if (!req.session?.authenticated) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { ciphertext, privateKey } = req.body;
+    if (typeof ciphertext !== "string" || typeof privateKey !== "string" || ciphertext.length < 100 || privateKey.length < 100) {
+      return res.status(400).json({ error: "Missing or invalid ciphertext/privateKey" });
+    }
+
+    const decapsulator = new KyberDecapsulator();
+    const cipherUint8 = base64ToUint8Array(ciphertext);
+    const privKeyUint8 = base64ToUint8Array(privateKey);
+    const sharedSecret = await decapsulator.decapsulate(cipherUint8, privKeyUint8);
+
+    res.json({
+      sharedSecret: uint8ArrayToBase64(sharedSecret),
+    });
+  } catch (err) {
+    console.error("[Kyber Decapsulate Error]:", err);
+    res.status(500).json({ error: "Decapsulation failed" });
   }
 });
 
