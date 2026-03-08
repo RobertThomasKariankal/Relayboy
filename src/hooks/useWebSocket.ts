@@ -302,8 +302,15 @@ export function useWebSocket() {
         let displayMessage = data.message;
 
         if (isEncryptedMessage(data.message)) {
+          // Try ciphertext-linked artifact cache first (survives refresh + id changes)
+          const artifactMap = await secureDB.getCachedPlaintextByCiphertexts([data.message]);
+          const artifactPlaintext = artifactMap.get(data.message);
+          if (artifactPlaintext) {
+            displayMessage = artifactPlaintext;
+          }
+
           // Check cache first for live messages
-          if (data.id) {
+          if (displayMessage === data.message && data.id) {
             const cached = await secureDB.getCachedMessages([data.id]);
             const cachedText = cached.get(String(data.id));
             if (cachedText) {
@@ -321,6 +328,13 @@ export function useWebSocket() {
                 if (data.id) {
                   secureDB.cacheDecryptedMessage(data.id, displayMessage).catch(() => { });
                 }
+                secureDB.cacheDecryptionArtifact({
+                  ciphertext: data.message,
+                  plaintext: displayMessage,
+                  peerUsername: data.from,
+                  direction: "in",
+                  messageId: data.id,
+                }).catch(() => { });
               } catch {
                 console.warn(`[Crypto] Live message decrypt failed for ${data.from}. Invalidating stale session.`);
                 sessionsRef.current.delete(data.from.toLowerCase());
@@ -370,9 +384,13 @@ export function useWebSocket() {
           const messageIds = processedMessages
             .filter(m => m.id && isEncryptedMessage(m.message))
             .map(m => m.id!);
+          const encryptedPayloads = processedMessages
+            .filter(m => isEncryptedMessage(m.message))
+            .map(m => m.message);
 
           // Get cached decrypted messages
           const cachedMessages = await secureDB.getCachedMessages(messageIds);
+          const artifactMessages = await secureDB.getCachedPlaintextByCiphertexts(encryptedPayloads);
 
           // Try session-based decryption for uncached messages
           const session = await getOrCreateSession(data.with, data.handshake, data.peer_public_key);
@@ -396,6 +414,13 @@ export function useWebSocket() {
                 if (msg.id) {
                   secureDB.cacheDecryptedMessage(msg.id, sessionDecrypted.message).catch(() => { });
                 }
+                secureDB.cacheDecryptionArtifact({
+                  ciphertext: msg.message,
+                  plaintext: sessionDecrypted.message,
+                  peerUsername: data.with,
+                  direction: msg.from.toLowerCase() === usernameRef.current.toLowerCase() ? "out" : "in",
+                  messageId: msg.id,
+                }).catch(() => { });
                 return sessionDecrypted;
               }
             }
@@ -405,9 +430,21 @@ export function useWebSocket() {
               return { ...msg, message: cachedMessages.get(String(msg.id))! };
             }
 
+            // Fall back to ciphertext-linked artifact cache
+            if (artifactMessages.has(msg.message)) {
+              return { ...msg, message: artifactMessages.get(msg.message)! };
+            }
+
             // If session decrypted it (even with failure), use that result
             if (decryptedViaSession && decryptedViaSession[i]) {
-              return decryptedViaSession[i];
+              const attempted = decryptedViaSession[i];
+              if (
+                attempted.message.includes("[Decryption Failed]") ||
+                attempted.message.includes("[Format Error]")
+              ) {
+                return { ...attempted, message: "[Encrypted message unavailable on this device]" };
+              }
+              return attempted;
             }
 
             return msg;
@@ -497,6 +534,12 @@ export function useWebSocket() {
       try {
         const encrypted = await session.encrypt(message);
         const finalMessage = wrapEncrypted(encrypted);
+        secureDB.cacheDecryptionArtifact({
+          ciphertext: finalMessage,
+          plaintext: message,
+          peerUsername: to,
+          direction: "out",
+        }).catch(() => { });
         socketRef.current.send(JSON.stringify({ type: "message", to, message: finalMessage }));
       } catch (err) {
         console.error("Encryption failed:", err);

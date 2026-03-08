@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = "relayboy_secure_storage";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export interface UserKeyRecord {
   username: string;
@@ -26,10 +26,28 @@ export interface DecryptedMessageRecord {
   plaintext: string;
 }
 
+export interface MessageDecryptArtifactRecord {
+  artifactKey: string;
+  plaintext: string;
+  peerUsername: string;
+  direction: "in" | "out";
+  messageId?: string;
+  updatedAt: number;
+}
+
+interface DecryptionArtifactInput {
+  ciphertext: string;
+  plaintext: string;
+  peerUsername: string;
+  direction: "in" | "out";
+  messageId?: string | number;
+}
+
 export class SecureDB {
   private db: IDBDatabase | null = null;
   private runtimeSessions = new Map<string, SessionRecord>();
   private runtimeDecryptedCache = new Map<string, string>();
+  private runtimeArtifactCache = new Map<string, MessageDecryptArtifactRecord>();
 
   async init(): Promise<void> {
     if (this.db) return;
@@ -55,6 +73,10 @@ export class SecureDB {
         // New: decrypted message plaintext cache
         if (!db.objectStoreNames.contains("decrypted_cache")) {
           db.createObjectStore("decrypted_cache", { keyPath: "id" });
+        }
+
+        if (!db.objectStoreNames.contains("message_artifacts")) {
+          db.createObjectStore("message_artifacts", { keyPath: "artifactKey" });
         }
       };
 
@@ -158,6 +180,58 @@ export class SecureDB {
       if (record?.plaintext) {
         this.runtimeDecryptedCache.set(key, record.plaintext);
         result.set(key, record.plaintext);
+      }
+    }
+
+    return result;
+  }
+
+  // --- Message Decryption Artifacts ---
+
+  private async sha256Hex(input: string): Promise<string> {
+    const data = new TextEncoder().encode(input);
+    const hash = await crypto.subtle.digest("SHA-256", data);
+    const bytes = new Uint8Array(hash);
+    return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  async cacheDecryptionArtifact(input: DecryptionArtifactInput): Promise<void> {
+    const artifactKey = await this.sha256Hex(input.ciphertext);
+    const record: MessageDecryptArtifactRecord = {
+      artifactKey,
+      plaintext: input.plaintext,
+      peerUsername: input.peerUsername.toLowerCase(),
+      direction: input.direction,
+      messageId: input.messageId !== undefined ? String(input.messageId) : undefined,
+      updatedAt: Date.now(),
+    };
+
+    this.runtimeArtifactCache.set(artifactKey, record);
+    await this.init();
+    await this.performTransaction("message_artifacts", "readwrite", (store) => store.put(record));
+  }
+
+  async getCachedPlaintextByCiphertexts(ciphertexts: string[]): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    await this.init();
+
+    for (const ciphertext of ciphertexts) {
+      const artifactKey = await this.sha256Hex(ciphertext);
+      const runtime = this.runtimeArtifactCache.get(artifactKey);
+      if (runtime?.plaintext) {
+        result.set(ciphertext, runtime.plaintext);
+        continue;
+      }
+
+      const persisted = await this.performTransaction<MessageDecryptArtifactRecord | undefined>(
+        "message_artifacts",
+        "readonly",
+        (store) => store.get(artifactKey)
+      );
+
+      if (persisted?.plaintext) {
+        this.runtimeArtifactCache.set(artifactKey, persisted);
+        result.set(ciphertext, persisted.plaintext);
       }
     }
 

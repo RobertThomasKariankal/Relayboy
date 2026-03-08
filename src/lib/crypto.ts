@@ -21,6 +21,7 @@ const HKDF_INFO = "AES-GCM-256-ZERO-METADATA";
 const RATCHET_INFO_CHAIN = "RATCHET-CHAIN-KEY";
 const RATCHET_INFO_MSG = "RATCHET-MESSAGE-KEY";
 const BEACON_INFO = "MESSAGE-LOOKUP-ID";
+const MAX_RATCHET_SKIP = 4096;
 
 // Encrypted message prefix for identification
 const ENC_PREFIX = "QE1:";
@@ -57,6 +58,14 @@ function fromBase64(base64: string): Uint8Array {
         bytes[i] = binary.charCodeAt(i);
     }
     return bytes;
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
 }
 
 /**
@@ -109,6 +118,35 @@ class RatchetChain {
         this.chainKey = newChain;
         this.step++;
         return { msgKey, step: this.step };
+    }
+
+    snapshot(): { chainKey: Uint8Array; step: number } {
+        return {
+            chainKey: new Uint8Array(this.chainKey),
+            step: this.step,
+        };
+    }
+
+    restore(snapshot: { chainKey: Uint8Array; step: number }): void {
+        this.chainKey = new Uint8Array(snapshot.chainKey);
+        this.step = snapshot.step;
+    }
+
+    async advanceUntilBeacon(
+        expectedBeacon: Uint8Array,
+        maxSkip: number = MAX_RATCHET_SKIP
+    ): Promise<{ msgKey: Uint8Array; step: number; skipped: number }> {
+        const start = this.snapshot();
+        for (let skipped = 0; skipped <= maxSkip; skipped++) {
+            const { msgKey, step } = await this.advance();
+            const beacon = await hkdfDerive(msgKey, BEACON_SIZE, BEACON_INFO);
+            if (bytesEqual(beacon, expectedBeacon)) {
+                return { msgKey, step, skipped };
+            }
+        }
+
+        this.restore(start);
+        throw new Error("Ratchet beacon mismatch");
     }
 
     get currentStep(): number {
@@ -339,7 +377,11 @@ export class CryptoSession {
         const release = await this.recvMutex.lock();
         try {
             const encrypted = fromBase64(encryptedBase64);
-            const { msgKey, step } = await this.recvChain.advance();
+            const expectedBeacon = encrypted.slice(0, BEACON_SIZE);
+            const { msgKey, step, skipped } = await this.recvChain.advanceUntilBeacon(expectedBeacon);
+            if (skipped > 0) {
+                console.debug(`[Crypto] Resynced recv chain for ${this.peerUsername}, skipped ${skipped} step(s)`);
+            }
             console.debug(`📥 [Crypto] Decrypting message at step ${step} from ${this.peerUsername}`);
             return await decryptWithMsgKey(msgKey, encrypted);
         } finally {
@@ -401,8 +443,11 @@ export class CryptoSession {
                     const isMine = msg.from.toLowerCase() === this.myUsername.toLowerCase();
                     const chain = isMine ? freshSession.sendChain : freshSession.recvChain;
 
-                    // Advance chain and decrypt (Sequential, no inner wait for locks)
-                    const { msgKey, step } = await chain.advance();
+                    const expectedBeacon = encData.slice(0, BEACON_SIZE);
+                    const { msgKey, step, skipped } = await chain.advanceUntilBeacon(expectedBeacon);
+                    if (skipped > 0) {
+                        console.debug(`[Crypto] History resync for ${this.peerUsername} message ${i}, skipped ${skipped} step(s)`);
+                    }
 
                     try {
                         const plaintext = await decryptWithMsgKey(msgKey, encData);
