@@ -18,15 +18,14 @@ export function AvatarBadge({ name, avatarUrl, isOnline = false, size = "md", cl
   const initial = name.charAt(0).toUpperCase();
 
   return (
-    <div className={cn("relative", className)}>
+    <div className={cn("relative rounded-full", sizeClasses[size], className)}>
       <div
         className={cn(
-          "gradient-primary rounded-full flex items-center justify-center font-semibold text-primary-foreground shadow-lg overflow-hidden",
-          sizeClasses[size]
+          "w-full h-full gradient-primary rounded-full flex items-center justify-center font-semibold text-primary-foreground shadow-lg overflow-hidden"
         )}
       >
         {avatarUrl ? (
-          <img src={avatarUrl} alt={name} className="w-full h-full object-cover" />
+          <img src={avatarUrl} alt={name} className="w-full h-full rounded-full object-cover" />
         ) : (
           initial
         )}

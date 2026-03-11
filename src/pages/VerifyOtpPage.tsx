@@ -10,6 +10,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp
 import AuthShell from "@/components/layout/AuthShell";
 import { secureDB } from "@/lib/db";
 import { encryptPrivateKey } from "@/lib/keyBackup";
+import { kyberKeygen } from "@/lib/kyber";
 
 const OTP_TTL_SECONDS = 300;
 
@@ -59,19 +60,10 @@ export default function VerifyOtpPage() {
     setError("");
 
     try {
-      // Generate Kyber keys via backend API
-      console.log("🔐 Generating Post-Quantum Kyber keys via API...");
+      // Generate Kyber keys on backend
+      console.log("🔐 Generating Post-Quantum Kyber keys via backend API...");
 
-      const response = await fetch("/api/kyber/keygen", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Key generation failed on server");
-
-      const publicKeyB64 = data.publicKey;
-      const privateKeyB64 = data.privateKey;
+      const { publicKey: publicKeyB64, privateKey: privateKeyB64 } = await kyberKeygen();
 
       setPendingKeys({ publicKeyB64, privateKeyB64 });
       setStep("master_password");

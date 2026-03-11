@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { CryptoSession, isEncryptedMessage, wrapEncrypted } from "@/lib/crypto";
 import { secureDB } from "@/lib/db";
-// Kyber removed, replacing with API calls
+import { kyberDecapsulate, kyberEncapsulate } from "@/lib/kyber";
 
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -26,12 +26,32 @@ interface WSMessage {
   message?: string;
   timestamp?: string;
   error?: string;
-  handshake?: any;
+  handshake?: WSHandshakeData;
   with?: string;
-  messages?: any[];
+  messages?: WSHistoryMessage[];
   counts?: { [user: string]: number };
   encrypted?: boolean;
   peer_public_key?: string;
+}
+
+interface WSHandshakeData {
+  type?: "provide_public_key";
+  ciphertext?: string;
+  public_key?: string;
+  receiver?: string;
+  sender?: string;
+  created_at?: string;
+}
+
+interface WSHistoryMessage {
+  id?: string | number;
+  from_user?: string;
+  from?: string;
+  message: string;
+  is_seen?: boolean;
+  created_at?: string | number;
+  timestamp?: string | number;
+  encrypted?: boolean;
 }
 
 export interface ChatUser {
@@ -60,6 +80,11 @@ export function useWebSocket() {
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(true);
+  const connectLogicRef = useRef<() => Promise<void>>(async () => {});
+  const historyDecryptFailuresRef = useRef<Map<string, { attempts: number; lastRecoveryAt: number }>>(new Map());
+
+  const HISTORY_RECOVERY_ATTEMPTS = 2;
+  const HISTORY_RECOVERY_COOLDOWN_MS = 5000;
 
   const clearReconnectTimer = () => {
     if (reconnectTimeoutRef.current !== null) {
@@ -68,7 +93,7 @@ export function useWebSocket() {
     }
   };
 
-  const getOrCreateSession = async (peer: string, handshakeData?: any, peerPublicKey?: string) => {
+  const getOrCreateSession = async (peer: string, handshakeData?: WSHandshakeData, peerPublicKey?: string) => {
     const peerKey = peer.toLowerCase();
 
     // Only use in-memory cache if we have NO new handshake data to validate against
@@ -126,26 +151,14 @@ export function useWebSocket() {
 
         if (isReceiverOfCurrentHandshake) {
           // We are RECEIVER: Decapsulate using our private key
-          console.log(`🤝 Completing handshake with ${peerKey} (RECEIVER) via API`);
+          console.log(`🤝 Completing handshake with ${peerKey} (RECEIVER)`);
           const myKeys = await secureDB.getUserKeys(usernameRef.current);
           if (!myKeys) {
             console.error("❌ Cannot decapsulate: Local private key missing!");
             return null;
           }
 
-          const response = await fetch("/api/kyber/decapsulate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ciphertext: handshakeData.ciphertext,
-              privateKey: myKeys.privateKey
-            })
-          });
-
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error || "Decapsulation failed");
-
-          sharedSecretB64 = data.sharedSecret;
+          sharedSecretB64 = await kyberDecapsulate(handshakeData.ciphertext, myKeys.privateKey);
           newCiphertext = handshakeData.ciphertext;
         } else {
           // We are SENDER (or no handshake exists, or we lost our sender cache): Encapsulate using peer's public key
@@ -155,17 +168,9 @@ export function useWebSocket() {
             return null;
           }
 
-          console.log(`🤝 Initiating new handshake with ${peerKey} (SENDER) via API`);
+          console.log(`🤝 Initiating new handshake with ${peerKey} (SENDER)`);
 
-          const response = await fetch("/api/kyber/encapsulate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ publicKey: pubKeyToUse })
-          });
-
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error || "Encapsulation failed");
-
+          const data = await kyberEncapsulate(pubKeyToUse);
           sharedSecretB64 = data.sharedSecret;
           newCiphertext = data.ciphertext;
 
@@ -205,7 +210,7 @@ export function useWebSocket() {
     return await initPromise;
   };
 
-  const connectLogic = () => {
+  const connectLogic = async () => {
     if (socketRef.current?.readyState === WebSocket.OPEN || socketRef.current?.readyState === WebSocket.CONNECTING) {
       return;
     }
@@ -213,8 +218,42 @@ export function useWebSocket() {
     shouldReconnectRef.current = true;
     clearReconnectTimer();
 
-    const protocol = window.location.hostname === "localhost" ? "ws" : "wss";
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
+    try {
+      const authRes = await fetch("/api/auth-status", {
+        credentials: "include",
+      });
+      if (!authRes.ok) {
+        throw new Error(`Auth check failed: ${authRes.status}`);
+      }
+
+      const authData = await authRes.json();
+      if (!authData?.authenticated) {
+        shouldReconnectRef.current = false;
+        setStatus("disconnected");
+        setError("Session expired. Please log in again.");
+        return;
+      }
+    } catch (err) {
+      console.error("Auth check before WS connect failed:", err);
+      setStatus("disconnected");
+      setError("Unable to verify session. Retrying...");
+      if (!shouldReconnectRef.current) return;
+      if (reconnectTimeoutRef.current !== null) return;
+
+      const attempt = reconnectAttemptsRef.current + 1;
+      reconnectAttemptsRef.current = attempt;
+      setReconnectAttempt(attempt);
+
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 10000);
+      reconnectTimeoutRef.current = window.setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        void connectLogic();
+      }, delay);
+      return;
+    }
+
+    const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${wsProtocol}://${window.location.host}/ws`);
     socketRef.current = socket;
 
     setStatus("connecting");
@@ -263,8 +302,15 @@ export function useWebSocket() {
         let displayMessage = data.message;
 
         if (isEncryptedMessage(data.message)) {
+          // Try ciphertext-linked artifact cache first (survives refresh + id changes)
+          const artifactMap = await secureDB.getCachedPlaintextByCiphertexts([data.message]);
+          const artifactPlaintext = artifactMap.get(data.message);
+          if (artifactPlaintext) {
+            displayMessage = artifactPlaintext;
+          }
+
           // Check cache first for live messages
-          if (data.id) {
+          if (displayMessage === data.message && data.id) {
             const cached = await secureDB.getCachedMessages([data.id]);
             const cachedText = cached.get(String(data.id));
             if (cachedText) {
@@ -282,6 +328,13 @@ export function useWebSocket() {
                 if (data.id) {
                   secureDB.cacheDecryptedMessage(data.id, displayMessage).catch(() => { });
                 }
+                secureDB.cacheDecryptionArtifact({
+                  ciphertext: data.message,
+                  plaintext: displayMessage,
+                  peerUsername: data.from,
+                  direction: "in",
+                  messageId: data.id,
+                }).catch(() => { });
               } catch {
                 console.warn(`[Crypto] Live message decrypt failed for ${data.from}. Invalidating stale session.`);
                 sessionsRef.current.delete(data.from.toLowerCase());
@@ -314,7 +367,7 @@ export function useWebSocket() {
 
       if (data.type === "history" && data.with && data.messages) {
         const peerKey = data.with.toLowerCase();
-        let processedMessages: ChatMessage[] = data.messages.map((m) => {
+        const processedMessages: ChatMessage[] = data.messages.map((m) => {
           if (m.id) processedMessageIds.current.add(m.id);
           return {
             id: m.id,
@@ -331,9 +384,13 @@ export function useWebSocket() {
           const messageIds = processedMessages
             .filter(m => m.id && isEncryptedMessage(m.message))
             .map(m => m.id!);
+          const encryptedPayloads = processedMessages
+            .filter(m => isEncryptedMessage(m.message))
+            .map(m => m.message);
 
           // Get cached decrypted messages
           const cachedMessages = await secureDB.getCachedMessages(messageIds);
+          const artifactMessages = await secureDB.getCachedPlaintextByCiphertexts(encryptedPayloads);
 
           // Try session-based decryption for uncached messages
           const session = await getOrCreateSession(data.with, data.handshake, data.peer_public_key);
@@ -357,6 +414,13 @@ export function useWebSocket() {
                 if (msg.id) {
                   secureDB.cacheDecryptedMessage(msg.id, sessionDecrypted.message).catch(() => { });
                 }
+                secureDB.cacheDecryptionArtifact({
+                  ciphertext: msg.message,
+                  plaintext: sessionDecrypted.message,
+                  peerUsername: data.with,
+                  direction: msg.from.toLowerCase() === usernameRef.current.toLowerCase() ? "out" : "in",
+                  messageId: msg.id,
+                }).catch(() => { });
                 return sessionDecrypted;
               }
             }
@@ -366,13 +430,59 @@ export function useWebSocket() {
               return { ...msg, message: cachedMessages.get(String(msg.id))! };
             }
 
+            // Fall back to ciphertext-linked artifact cache
+            if (artifactMessages.has(msg.message)) {
+              return { ...msg, message: artifactMessages.get(msg.message)! };
+            }
+
             // If session decrypted it (even with failure), use that result
             if (decryptedViaSession && decryptedViaSession[i]) {
-              return decryptedViaSession[i];
+              const attempted = decryptedViaSession[i];
+              if (
+                attempted.message.includes("[Decryption Failed]") ||
+                attempted.message.includes("[Format Error]")
+              ) {
+                return { ...attempted, message: "[Encrypted message unavailable on this device]" };
+              }
+              return attempted;
             }
 
             return msg;
           });
+
+          const failedDecryptCount = finalMessages.reduce((count, msg) => {
+            if (
+              msg.message.includes("[Decryption Failed]") ||
+              msg.message.includes("[Format Error]")
+            ) {
+              return count + 1;
+            }
+            return count;
+          }, 0);
+
+          if (failedDecryptCount > 0) {
+            const now = Date.now();
+            const state = historyDecryptFailuresRef.current.get(peerKey) || { attempts: 0, lastRecoveryAt: 0 };
+            const nextAttempts = state.attempts + 1;
+            historyDecryptFailuresRef.current.set(peerKey, {
+              attempts: nextAttempts,
+              lastRecoveryAt: state.lastRecoveryAt,
+            });
+
+            const canRecover =
+              nextAttempts >= HISTORY_RECOVERY_ATTEMPTS &&
+              now - state.lastRecoveryAt > HISTORY_RECOVERY_COOLDOWN_MS;
+
+            if (canRecover) {
+              console.warn(`[Crypto] Repeated history decrypt failures for ${peerKey}. Re-establishing session.`);
+              sessionsRef.current.delete(peerKey);
+              await secureDB.deleteSession(peerKey);
+              historyDecryptFailuresRef.current.set(peerKey, { attempts: 0, lastRecoveryAt: now });
+              socketRef.current?.send(JSON.stringify({ type: "get_history", to: data.with }));
+            }
+          } else {
+            historyDecryptFailuresRef.current.delete(peerKey);
+          }
 
           setHistory({
             with: data.with,
@@ -396,7 +506,7 @@ export function useWebSocket() {
       const delay = Math.min(1000 * 2 ** (attempt - 1), 10000);
       reconnectTimeoutRef.current = window.setTimeout(() => {
         reconnectTimeoutRef.current = null;
-        connect();
+        void connectLogic();
       }, delay);
     };
 
@@ -407,7 +517,10 @@ export function useWebSocket() {
     };
   };
 
-  const connect = useCallback(connectLogic, []);
+  connectLogicRef.current = connectLogic;
+  const connect = useCallback(() => {
+    void connectLogicRef.current();
+  }, []);
 
   const sendMessage = useCallback(async (to: string, message: string) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -421,6 +534,12 @@ export function useWebSocket() {
       try {
         const encrypted = await session.encrypt(message);
         const finalMessage = wrapEncrypted(encrypted);
+        secureDB.cacheDecryptionArtifact({
+          ciphertext: finalMessage,
+          plaintext: message,
+          peerUsername: to,
+          direction: "out",
+        }).catch(() => { });
         socketRef.current.send(JSON.stringify({ type: "message", to, message: finalMessage }));
       } catch (err) {
         console.error("Encryption failed:", err);
